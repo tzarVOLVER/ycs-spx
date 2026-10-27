@@ -94,4 +94,9 @@ ASSETS/**
 !ASSETS/ExtraFunctions/modules
 !ASSETS/ExtraFunctions/spx_internal_demo_functions.js
 
+# Local YCS runtime/configuration and generated demo rundowns.
+.local/
+!ycs/**/*.md
+!YCS.md
+
 

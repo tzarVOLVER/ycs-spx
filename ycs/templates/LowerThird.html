@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>YCS lower-third test</title>
+<style>
+html,body{width:1920px;height:1080px;margin:0;overflow:hidden;background:transparent;font-family:Arial,sans-serif}
+#lower-third{position:absolute;left:145px;top:785px;width:720px;padding:18px 25px;background:#202020;border-left:6px solid #f3ce33;color:white;opacity:0;transform:translateY(20px);transition:opacity .2s,transform .2s}
+#lower-third.visible{opacity:1;transform:none}#name{font-size:38px;font-weight:bold}#title{font-size:22px;color:#f3ce33;margin-top:6px}
+</style>
+<script>
+window.SPXGCTemplateDefinition={"description":"Lower third — stage isolation test","playserver":"OVERLAY","playchannel":"1","playlayer":"2","webplayout":"2","steps":"1","out":"manual","uicolor":"3","dataformat":"json","DataFields":[{"field":"f0","ftype":"textfield","title":"Name","value":"PLAYER NAME"},{"field":"f1","ftype":"textfield","title":"Title","value":"FEATURE MATCH"}]};
+window.update=function(input){const data=typeof input==='string'?JSON.parse(input):input;document.getElementById('name').textContent=data.f0||'';document.getElementById('title').textContent=data.f1||'';};
+window.play=function(){document.getElementById('lower-third').classList.add('visible');};
+window.stop=function(){document.getElementById('lower-third').classList.remove('visible');};
+</script></head><body><div id="lower-third"><div id="name"></div><div id="title"></div></div></body></html>

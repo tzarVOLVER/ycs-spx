@@ -12,7 +12,8 @@
     ]
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test ycs/tests/*.test.cjs",
+    "ycs:demo": "node ycs/setup-demo.cjs",
     "devORG": "nodemon server.js -i config.json -i DATAROOT/",
     "dev": "nodemon server.js -i DATAROOT/* -i ASSETS/* -i config.json -i DATAROOT_VIDEO/*",
     "devdemo": "nodemon server.js config_demodataroot.json -i DATAROOT_DEMO/* -i config_demodataroot.json",

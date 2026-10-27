@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 {{>copyright }}
 
-<html lang="en">
+<html lang="en" {{#if ycsStage}}data-ycs-stage="{{ycsStage.id}}"{{/if}}>
 
 <head>
   <meta charset="UTF-8">
@@ -19,6 +19,7 @@
     var socket = io();
   </script>
   <script src="/js/spx_gc.js"></script>
+  {{#if ycsStage}}<script type="module" src="/ycs/controller.js"></script>{{/if}}
 
       <script>
     // Make the DIV element draggable:
@@ -1065,7 +1066,7 @@
               {{#ifValue disableLRender "true"}}
                 src="/templates/empty.html"
               {{else}}
-                src="/renderer"
+                src="{{#if ycsStage}}{{ycsStage.previewUrl}}{{else}}/renderer{{/if}}"
               {{/ifValue}}
               class="renderer"
               {{#if background}}

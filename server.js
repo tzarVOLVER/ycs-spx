@@ -815,6 +815,9 @@ app.use(session({
 
 global.user = "";
 
+// Optional YCS stage routing, registered before the legacy shared playout routes.
+require('./ycs/index.cjs')(app, config);
+
 // Router files
 const ROUTEfiles = require('./routes/routes-api.js');
 app.use('/api/', ROUTEfiles);
@@ -841,7 +844,7 @@ process.on('uncaughtException', function(err) {
 });    
 
 
-var server = app.listen(port, (err) => {
+var server = app.listen(port, config.ycs?.listenHost, (err) => {
 
   let splash = '  Copyright 2020- SPX Graphics\n\n' +
   `  SPX Solo version .......... ${global.vers}\n` +  

@@ -1,6 +1,8 @@
 
 # SPX Graphics Controller
 
+This YCS fork adds optional stage-isolated playback. See [YCS setup and architecture](YCS.md) for the current implementation and its development configuration. The upstream documentation below is retained for the base application.
+
 **Manage and control HTML graphics in live production.**
 
 >  Readme updated 2026-05-28
