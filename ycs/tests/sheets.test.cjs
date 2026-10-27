@@ -107,14 +107,14 @@ test('automatic polling respects interval/backoff and last-good cache survives r
 test('concurrent refreshes are coalesced and stale source-manager saves are rejected', async t => {
   const r = await sourcesFixture(t), added = await r.sources.addSheet('Public round', settings, r.sources.snapshot().revision);
   let release, reads = 0;
-  r.sources.sheets = { read: async () => { reads++; await new Promise(resolve => { release = resolve; }); return { value: 'ONE REQUEST' }; } };
+  r.sources.sheets = { read: async () => { reads++; await new Promise(resolve => { release = resolve; }); return { rows: [[{ address: 'A2', value: 'ONE REQUEST', usable: true }]] }; } };
   const a = r.sources.refreshSheet(added.sourceId), b = r.sources.refreshSheet(added.sourceId);
   await new Promise(resolve => setImmediate(resolve)); assert.equal(reads, 1); release(); await Promise.all([a, b]);
   assert.equal(r.sources.value(added.sourceId), 'ONE REQUEST');
   r.sources.sheets = r.sheets;
   await assert.rejects(r.sources.addSheet('Stale', settings, 0), { status: 409 });
   const raw = JSON.parse(await fs.readFile(r.sources.file, 'utf8'));
-  raw.sources[added.sourceId].settings.cell = 'A3'; raw.revision++;
+  raw.sources[added.sourceId].binding.selection.cell = 'A3'; raw.revision++;
   await fs.writeFile(r.sources.file, JSON.stringify(raw)); await r.sources.refresh();
   assert.equal(r.sources.value(added.sourceId), undefined, 'a changed cell must not reuse another cell’s cache');
 });

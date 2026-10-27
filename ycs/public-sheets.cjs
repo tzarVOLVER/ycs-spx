@@ -9,7 +9,7 @@ function parseRange(value) {
   if (!match) fail('Use an A1 cell or bounded range, such as B2 or A1:D10; enter the worksheet separately');
   const firstColumn = columnNumber(match[1]), firstRow = Number(match[2]);
   const lastColumn = columnNumber(match[3] || match[1]), lastRow = Number(match[4] || match[2]);
-  if (lastColumn < firstColumn || lastRow < firstRow || lastColumn - firstColumn >= 12 || lastRow - firstRow >= 20) fail('Preview a range of up to 20 rows and 12 columns');
+  if (lastColumn < firstColumn || lastRow < firstRow || lastColumn - firstColumn >= 32 || lastRow - firstRow >= 200) fail('Use a range of up to 200 rows and 32 columns');
   return { firstColumn, firstRow, lastColumn, lastRow, a1: `${match[1]}${firstRow}` + (match[3] ? `:${match[3]}${lastRow}` : '') };
 }
 function normalizeSettings(input) {

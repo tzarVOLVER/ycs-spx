@@ -1,161 +1,142 @@
-let documentState, stages = [];
-const drafts = new Map(), remoteCards = new Map();
-const message = document.getElementById('message');
-async function request(url, body) {
-  const response = await fetch(url, body === undefined ? { cache: 'no-store' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Data Manager request failed'); return data;
-}
-function notice(text, warning = false) { message.textContent = text; message.classList.toggle('warning', warning); }
-function health(data) {
-  const target = document.getElementById('health');
-  const count = Object.values(data.sources).filter(source => source.type === 'google-sheets').length;
-  target.textContent = data.health === 'ok' ? `Source configuration connected · ${count} Google Sheets source(s)` : data.error;
-  target.classList.toggle('warning', data.health !== 'ok');
-}
-function controls(label, value, key, submit, options) {
-  const form = document.createElement('form'); form.className = options ? 'mapping' : 'source';
-  const caption = document.createElement('label'); caption.textContent = label;
-  const input = document.createElement(options ? 'select' : 'input'); input.id = key; caption.htmlFor = key;
-  if (options) for (const [id, source] of Object.entries(options)) {
-    const option = document.createElement('option'); option.value = id; option.textContent = source.label; input.append(option);
+const $ = id => document.getElementById(id);
+let state, stages = [], mapping, catalog = [], loading = false, disposed = false, editingId = null, tested = '', draftRevision;
+const rows = new Map();
+function node(tag, text, className) { const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (className) element.className = className; return element; }
+function option(select, value, title) { const result = node('option', title); result.value = value; select.append(result); }
+function label(title, input) { const result = node('label', title); result.append(input); return result; }
+function button(title, callback) { const result = node('button', title); result.type = 'button'; result.addEventListener('click', () => Promise.resolve(callback()).catch(error => message(error.message, true))); return result; }
+function message(text, error = false) { $('message').textContent = text; $('message').classList.toggle('error', error); }
+async function request(url, body) { const response = await fetch('/api/ycs' + url, body === undefined ? { cache: 'no-store' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Request failed'); return result; }
+function showTab(name) { for (const tab of ['sources', 'mappings']) { $(tab + '-tab').setAttribute('aria-selected', String(name === tab)); $(tab + '-view').hidden = name !== tab; } }
+$('sources-tab').onclick = () => showTab('sources'); $('mappings-tab').onclick = () => showTab('mappings');
+function time(value) { return value ? new Date(value).toLocaleTimeString() : 'Waiting for first read'; }
+function usageText(usage) { return `${stages.find(stage => stage.id === usage.stage)?.title || usage.stage} · ${usage.graphic || 'Template default'} · ${usage.field}${usage.kind === 'on-air' ? ' · ON AIR' : ''}`; }
+function renderConnections() {
+  const container = $('connections'); container.replaceChildren();
+  for (const [id, connection] of Object.entries(state.connections || {})) {
+    const card = node('article', undefined, 'connection'), top = node('div', undefined, 'connection-top'), badge = node('span', connection.health === 'ok' ? 'Connected' : connection.health === 'loading' ? 'Connecting' : 'Needs attention', 'status');
+    badge.classList.toggle('warning', connection.health !== 'ok'); top.append(node('h3', connection.label), badge);
+    const actions = node('div', undefined, 'connection-actions');
+    actions.append(button('Refresh', async () => { state = await request(`/data/connections/${id}/refresh`, {}); renderConnections(); refreshValues(); }), button('Edit', () => openConnection(id)));
+    const remove = button('Remove', async () => { state = await request(`/data/connections/${id}/remove`, { revision: state.revision }); renderConnections(); message('Connection removed.'); });
+    remove.disabled = connection.usages.length > 0; remove.title = remove.disabled ? 'Remove its field mappings and stop linked on-air graphics first' : 'Remove unused connection'; actions.append(remove); top.append(actions);
+    card.append(top, node('p', `${connection.settings.worksheet} · ${connection.settings.range} · Every ${connection.settings.refreshSeconds}s · Last read ${time(connection.lastSuccess)}`, 'meta'));
+    if (connection.error || connection.warning) card.append(node('p', (connection.error || connection.warning) + ' · Holding last valid values.', 'warning'));
+    const details = node('details'); details.append(node('summary', `${connection.usages.length} field reference${connection.usages.length === 1 ? '' : 's'}`));
+    const list = node('ul'); for (const usage of connection.usages) list.append(node('li', usageText(usage))); if (!connection.usages.length) list.append(node('li', 'Ready to assign from Mappings.')); details.append(list); card.append(details); container.append(card);
   }
-  else { input.type = 'text'; input.maxLength = 300; input.required = true; }
-  input.value = drafts.get(key) ?? value;
-  input.addEventListener('input', () => drafts.set(key, input.value));
-  const line = document.createElement('div'); line.className = 'controls';
-  const button = document.createElement('button'); button.type = 'submit'; button.textContent = options ? 'Save mapping' : 'Publish source';
-  line.append(input, button); form.append(caption, line);
-  form.addEventListener('submit', async event => {
-    event.preventDefault(); button.disabled = true;
-    try {
-      const next = await submit(input.value, documentState.revision);
-      drafts.delete(key); documentState = next; render();
-      notice(options ? 'Mapping saved. Apply it to program with Play or Update in the rundown.' : 'Source published. Committed linked fields follow it automatically.');
-    } catch (error) { notice(error.message, true); }
-    finally { button.disabled = false; }
-  });
-  return form;
+  if (!container.children.length) container.append(node('div', 'No connections yet. Add a public Google Sheet to get started.', 'empty'));
 }
-function sourceStatus(source) {
-  const last = source.lastSuccess ? new Date(source.lastSuccess).toLocaleString() : 'Not yet';
-  const state = source.health === 'ok' ? 'Connected' : source.health === 'loading' ? 'Connecting; using the saved value if available' : `${source.error || 'Source stale/unavailable'} · keeping the last valid value`;
-  return `${state} · Last success: ${last}${source.health !== 'ok' && source.nextRefresh ? ' · Retry: ' + new Date(source.nextRefresh).toLocaleTimeString() : ''}${source.warning ? ' · ' + source.warning : ''}`;
-}
-function updateRemoteCards(data) {
-  for (const [id, nodes] of remoteCards) {
-    const source = data.sources[id];
-    if (!source) { nodes.status.textContent = 'Source changed elsewhere. Reload saved data.'; nodes.status.classList.add('warning'); continue; }
-    nodes.value.textContent = source.value ?? 'Waiting for the first valid value';
-    nodes.status.textContent = sourceStatus(source);
-    nodes.status.classList.toggle('warning', source.health !== 'ok' || Boolean(source.warning));
+function renderLocal() {
+  $('local-sources').replaceChildren();
+  for (const [id, source] of Object.entries(state.sources)) if (source.type === 'local') {
+    const form = node('form', undefined, 'local-value'), input = node('input'); input.value = source.value; input.maxLength = 300; input.required = true;
+    const save = node('button', 'Publish test value'); save.type = 'submit'; form.append(label(source.label, input), save);
+    form.onsubmit = async event => { event.preventDefault(); save.disabled = true; try { state = await request('/data/source', { id, value: input.value, revision: state.revision }); message('Test value published to committed linked fields.'); } catch (error) { message(error.message, true); } finally { save.disabled = false; } }; $('local-sources').append(form);
   }
 }
-function remoteCard(id, source) {
-  const card = document.createElement('div'); card.className = 'source remote-source';
-  const title = document.createElement('strong'); title.textContent = source.label;
-  const value = document.createElement('output'); value.className = 'remote-value'; value.setAttribute('aria-label', `${source.label} live value`);
-  const status = document.createElement('p'); status.className = 'source-status'; status.setAttribute('role', 'status');
-  const details = document.createElement('small'); details.textContent = `Google Sheets · tab ${source.settings.worksheet} · ${source.settings.cell} · every ${source.settings.refreshSeconds}s`;
-  const link = document.createElement('a'); link.href = source.settings.url + (/^\d+$/.test(source.settings.worksheet) ? '#gid=' + source.settings.worksheet : ''); link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = 'Open spreadsheet';
-  const refresh = document.createElement('button'); refresh.type = 'button'; refresh.textContent = 'Refresh now';
-  refresh.addEventListener('click', async () => {
-    refresh.disabled = true;
-    try {
-      const next = await request(`/api/ycs/data/sheets/${encodeURIComponent(id)}/refresh`, {}); updateRemoteCards(next);
-      notice(next.sources[id]?.health === 'ok' ? 'Sheet refreshed.' : next.sources[id]?.error || 'Sheet unavailable; retaining the last valid value.', next.sources[id]?.health !== 'ok');
-    } catch (error) { notice(error.message, true); }
-    finally { refresh.disabled = false; }
-  });
-  const actions = document.createElement('div'); actions.className = 'source-actions'; actions.append(link, refresh);
-  card.append(title, value, details, status, actions); remoteCards.set(id, { value, status }); return card;
+function settings() { return { url: $('sheet-url').value, worksheet: $('sheet-worksheet').value, range: $('sheet-range').value, refreshSeconds: Number($('sheet-refresh').value) }; }
+function openConnection(id = null) {
+  editingId = id; tested = ''; draftRevision = state.revision; const connection = state.connections[id];
+  $('connection-form').reset(); $('sheet-label').value = connection?.label || ''; $('sheet-url').value = connection?.settings.url || ''; $('sheet-worksheet').value = connection?.settings.worksheet || ''; $('sheet-range').value = connection?.settings.range || 'A1:D4'; $('sheet-refresh').value = connection?.settings.refreshSeconds || 5;
+  $('connection-title').textContent = id ? 'Edit connection' : 'Add connection'; $('sheet-preview').replaceChildren(); $('sheet-test-status').textContent = ''; $('save-sheet').disabled = true;
+  $('connection-usage').textContent = connection?.usages.length ? `Used by ${connection.usages.length} field references. You can change its name or refresh interval. Add a new connection to change the sheet, tab or range.` : '';
+  for (const key of ['sheet-url', 'sheet-worksheet', 'sheet-range']) $(key).readOnly = Boolean(connection?.usages.length);
+  $('connection-dialog').showModal(); $('sheet-label').focus();
 }
-function render() {
-  health(documentState); remoteCards.clear();
-  const sources = document.getElementById('sources'); sources.replaceChildren();
-  for (const [id, source] of Object.entries(documentState.sources)) {
-    if (source.type === 'google-sheets') sources.append(remoteCard(id, source));
-    else {
-      const form = controls(source.label, source.value, `source-${id}`, (value, revision) => request('/api/ycs/data/source', { id, value, revision }));
-      const key = document.createElement('small'); key.textContent = id; form.append(key); sources.append(form);
+$('add-connection').onclick = () => openConnection(); $('close-connection').onclick = () => $('connection-dialog').close();
+for (const input of document.querySelectorAll('[data-setting]')) input.addEventListener('input', () => { tested = ''; $('save-sheet').disabled = true; $('sheet-test-status').textContent = 'Test the updated settings before saving.'; });
+function previewTable(data) {
+  $('sheet-preview').replaceChildren(); const table = node('table'), body = node('tbody');
+  for (const cells of data.slice(0, 10)) { const row = node('tr'); row.append(node('th', cells[0]?.address.match(/\d+$/)?.[0] || '')); for (const cell of cells.slice(0, 8)) { const value = node('td', cell.value); value.title = cell.address; row.append(value); } body.append(row); }
+  table.append(body); $('sheet-preview').append(table, node('p', 'Preview: first 10 rows and 8 columns. Values remain read-only.', 'hint'));
+}
+$('test-sheet').onclick = async () => {
+  const submitted = JSON.stringify(settings()); $('test-sheet').disabled = true; $('save-sheet').disabled = true; $('sheet-test-status').textContent = 'Reading public sheet…';
+  try { const result = await request('/data/sheets/test', { settings: JSON.parse(submitted) }); if (submitted !== JSON.stringify(settings())) return; tested = submitted; previewTable(result.rows); $('sheet-test-status').textContent = 'Connected. Choose fields from Mappings after saving.'; $('save-sheet').disabled = false; }
+  catch (error) { tested = ''; $('sheet-test-status').textContent = error.message; } finally { $('test-sheet').disabled = false; }
+};
+$('connection-form').onsubmit = async event => {
+  event.preventDefault(); if (tested !== JSON.stringify(settings())) return; $('save-sheet').disabled = true;
+  try { const result = await request('/data/connections', { id: editingId, label: $('sheet-label').value, settings: settings(), revision: draftRevision }); state = result.snapshot; $('connection-dialog').close(); renderConnections(); message('Connection saved. Assign its fields in Mappings.'); }
+  catch (error) { $('sheet-test-status').textContent = error.message; $('save-sheet').disabled = false; }
+};
+function select(options, value) { const control = node('select'); for (const [id, title] of options) option(control, id, title); control.value = value; return control; }
+function headers(connection, headerRow) { return connection?.rows.find(row => Number(row[0]?.address.match(/\d+$/)?.[0]) === Number(headerRow)) || []; }
+function chooser(title, value, values) { const input = node('input'); input.value = value || ''; const list = node('datalist'); list.id = 'choices-' + (++chooser.sequence); input.setAttribute('list', list.id); for (const value of [...new Set(values.filter(Boolean))]) option(list, value, value); const result = label(title, input); result.append(list); return { result, input }; } chooser.sequence = 0;
+function connectionChoices() { return [['', 'Unassigned — manual only'], ...Object.entries(state.connections).map(([id, item]) => [id, item.label]), ...Object.entries(state.sources).filter(([id, item]) => !id.startsWith('bind.') && item.type === 'local').map(([id, item]) => ['source:' + id, (item.type === 'local' ? 'Local · ' : 'Saved cell · ') + item.label])]; }
+function suggestedPick(connection) {
+  const headerRow = Number(connection.rows[0]?.[0]?.address.match(/\d+$/)?.[0]) || 1, columns = headers(connection, headerRow).map(cell => cell.value);
+  const stageTitle = stages.find(item => item.id === $('mapping-stage').value)?.title || $('mapping-stage').value;
+  const keyColumn = columns.find(value => /stage/i.test(value)) || columns[0] || '', index = columns.indexOf(keyColumn);
+  const match = connection.rows.slice(1).find(row => row[index]?.value.toLowerCase() === stageTitle.toLowerCase());
+  return { kind: 'row', headerRow, keyColumn, keyValue: match?.[index]?.value || stageTitle.toUpperCase(), valueColumn: columns.find(value => /round/i.test(value)) || columns[1] || columns[0] || '' };
+}
+function dirty(row) { row.dirty = true; $('save-mappings').disabled = false; $('mapping-status').textContent = 'Unsaved mappings · Program unchanged'; }
+function renderMapping(field) {
+  const article = node('article', undefined, 'mapping-field'), heading = node('div', undefined, 'field-heading');
+  const scope = select([['override', 'This graphic'], ['default', 'Template default for this stage'], ['inherit', 'Use template default']], field.origin === 'default' ? 'inherit' : 'override'); scope.setAttribute('aria-label', field.title + ' mapping scope');
+  heading.append(node('h3', field.title), scope); article.append(heading);
+  const controls = node('div', undefined, 'mapping-controls'), sourceSelect = select(connectionChoices(), field.binding?.source ? 'source:' + field.binding.source : field.binding?.connection || '');
+  sourceSelect.setAttribute('aria-label', field.title + ' source');
+  const row = { field, article, controls, sourceSelect, scope, binding: structuredClone(field.binding), dirty: false, live: node('p', undefined, 'live-value') }; rows.set(field.field, row);
+  function selectors() {
+    controls.replaceChildren(); controls.hidden = scope.value === 'inherit'; controls.append(label('Connection / local value', sourceSelect));
+    if (!sourceSelect.value || sourceSelect.value.startsWith('source:')) { row.binding = sourceSelect.value ? { source: sourceSelect.value.slice(7) } : null; paintValue(row); return; }
+    const connection = state.connections[sourceSelect.value]; if (!connection) return;
+    if (row.binding?.connection !== sourceSelect.value) row.binding = { connection: sourceSelect.value, selection: suggestedPick(connection) };
+    const pick = row.binding.selection;
+    const kind = select([['row', 'Match a row'], ['cell', 'Fixed cell']], pick.kind); controls.append(label('Select data by', kind));
+    const group = node('div', undefined, 'selector-fields'); controls.append(group);
+    if (pick.kind === 'cell') {
+      const input = node('input'); input.value = pick.cell || ''; input.placeholder = 'A2'; group.append(label('Cell in this range', input)); input.oninput = () => { pick.cell = input.value.trim().toUpperCase(); dirty(row); paintValue(row); };
+    } else {
+      const header = node('input'); header.type = 'number'; header.min = 1; header.value = pick.headerRow; group.append(label('Header row', header));
+      const columns = headers(connection, pick.headerRow).map(cell => cell.value), key = chooser('Key column', pick.keyColumn, columns), value = chooser('Value column', pick.valueColumn, columns), index = columns.indexOf(pick.keyColumn), match = chooser('Row key', pick.keyValue, connection.rows.slice(1).map(row => row[index]?.value));
+      group.append(key.result, match.result, value.result);
+      for (const [input, property] of [[header, 'headerRow'], [key.input, 'keyColumn'], [match.input, 'keyValue'], [value.input, 'valueColumn']]) input.oninput = () => { pick[property] = property === 'headerRow' ? Number(input.value) : input.value; dirty(row); paintValue(row); };
     }
+    kind.onchange = () => { row.binding.selection = kind.value === 'cell' ? { kind: 'cell', cell: connection.rows[1]?.[0]?.address || connection.rows[0]?.[0]?.address || '' } : suggestedPick(connection); selectors(); dirty(row); };
+    paintValue(row);
   }
-  updateRemoteCards(documentState);
-  const mappings = document.getElementById('mappings'); mappings.replaceChildren();
-  for (const stage of stages) {
-    const mapping = documentState.mappings.find(item => item.stage === stage.id && item.graphic === 'ticker' && item.field === 'f5');
-    mappings.append(controls(`${stage.title} / Ticker / Current round`, mapping?.source || '', `mapping-${stage.id}`,
-      (source, revision) => request('/api/ycs/data/mapping', { stage: stage.id, graphic: 'ticker', field: 'f5', source, revision }), documentState.sources));
+  sourceSelect.onchange = () => { selectors(); dirty(row); }; scope.onchange = () => { selectors(); dirty(row); };
+  article.append(controls, row.live); selectors(); return article;
+}
+function selectedValue(pick) {
+  if (!pick) return 'Unassigned · manual text remains available';
+  if (pick.source) return state.sources[pick.source]?.value || 'Waiting for a valid source value';
+  const connection = state.connections[pick.connection], selection = pick.selection;
+  if (!connection) return 'Connection unavailable';
+  let cell;
+  if (selection.kind === 'cell') cell = connection.rows.flat().find(cell => cell.address === selection.cell);
+  else {
+    const columns = headers(connection, selection.headerRow).map(cell => cell.value), keys = columns.filter(value => value === selection.keyColumn), values = columns.filter(value => value === selection.valueColumn);
+    if (keys.length !== 1 || values.length !== 1) return 'Key or value column missing / duplicated';
+    const matches = connection.rows.filter(row => Number(row[0]?.address.match(/\d+$/)?.[0]) > selection.headerRow && row[columns.indexOf(selection.keyColumn)]?.value === selection.keyValue);
+    if (matches.length !== 1) return matches.length ? 'Multiple matching rows · last valid value retained' : 'No matching row · last valid value retained';
+    cell = matches[0][columns.indexOf(selection.valueColumn)];
   }
+  return cell?.usable ? cell.value : 'Empty or invalid selection · last valid value retained';
 }
-async function load() {
-  [documentState, stages] = await Promise.all([request('/api/ycs/data'), request('/api/ycs/stages')]);
-  const links = document.getElementById('stages'); links.replaceChildren();
-  for (const stage of stages) { const link = document.createElement('a'); link.href = stage.controller; link.textContent = `${stage.title} rundown`; links.append(link); }
-  render();
+function paintValue(row) { row.live.replaceChildren(node('span', row.scope.value === 'inherit' ? 'Saved template default' : 'Source preview'), node('strong', selectedValue(row.scope.value === 'inherit' ? state.defaults.find(item => item.stage === $('mapping-stage').value && item.template === mapping.template && item.field === row.field.field)?.binding : row.binding))); }
+function refreshValues() { for (const row of rows.values()) paintValue(row); }
+async function loadMappings() {
+  if (!$('mapping-graphic').value) { rows.clear(); $('mapping-fields').replaceChildren(node('p', 'No graphics in this stage.', 'empty')); return; }
+  const result = await request(`/data/mappings/${$('mapping-stage').value}/${encodeURIComponent($('mapping-graphic').value)}`); mapping = result; rows.clear(); $('mapping-fields').replaceChildren(...result.fields.map(renderMapping)); $('save-mappings').disabled = true;
+  $('mapping-context').textContent = catalog.find(item => item.id === $('mapping-graphic').value)?.title + ' · ' + result.template; $('mapping-status').textContent = 'Mappings saved · Program unchanged';
 }
-
-const addForm = document.getElementById('add-sheet'), testButton = document.getElementById('test-sheet'), saveButton = document.getElementById('save-sheet');
-const testStatus = document.getElementById('sheet-test-status'), selectedText = document.getElementById('selected-cell'), preview = document.getElementById('sheet-preview');
-let tested, selected, generation = 0;
-function settings() {
-  return { url: document.getElementById('sheet-url').value, worksheet: document.getElementById('sheet-worksheet').value,
-    range: document.getElementById('sheet-range').value, refreshSeconds: Number(document.getElementById('sheet-refresh').value) };
+async function loadGraphics() { catalog = await request(`/stages/${$('mapping-stage').value}/graphics`); $('mapping-graphic').replaceChildren(); for (const item of catalog) option($('mapping-graphic'), item.id, item.title); const requested = new URLSearchParams(location.search).get('graphic'); if (catalog.some(item => item.id === requested)) $('mapping-graphic').value = requested; await loadMappings(); }
+$('mapping-stage').onchange = () => loadGraphics().catch(error => message(error.message, true)); $('mapping-graphic').onchange = () => loadMappings().catch(error => message(error.message, true)); $('reload-mappings').onclick = () => loadMappings().then(() => message('Saved mappings reloaded.')).catch(error => message(error.message, true));
+$('save-mappings').onclick = async () => {
+  $('save-mappings').disabled = true;
+  try { state = await request(`/data/mappings/${$('mapping-stage').value}/${encodeURIComponent($('mapping-graphic').value)}`, { revision: mapping.revision, edits: [...rows.values()].filter(row => row.dirty).map(row => ({ field: row.field.field, scope: row.scope.value, binding: row.binding })) }); await loadMappings(); renderConnections(); message('Mappings saved. Preview or Update / Play the graphic to use them.'); }
+  catch (error) { message(error.message, true); $('save-mappings').disabled = false; }
+};
+async function poll() { if (loading || disposed) return; loading = true; try { state = await request('/data'); $('health').textContent = state.health === 'ok' ? 'Background sync active' : 'Data needs attention'; $('health').classList.toggle('warning', state.health !== 'ok'); if (!document.querySelector('#connections details[open]') && !document.activeElement?.closest('#connections')) renderConnections(); refreshValues(); } catch { $('health').textContent = 'Server disconnected'; $('health').classList.add('warning'); } finally { loading = false; } }
+async function initialize() {
+  [state, stages] = await Promise.all([request('/data'), request('/stages')]);
+  for (const stage of stages) { const link = node('a', stage.title + ' rundown'); link.href = stage.controller; $('stages').append(link); option($('mapping-stage'), stage.id, stage.title); }
+  const params = new URLSearchParams(location.search); if (stages.some(stage => stage.id === params.get('stage'))) $('mapping-stage').value = params.get('stage'); if (params.get('graphic')) showTab('mappings');
+  renderConnections(); renderLocal(); await loadGraphics(); await poll();
 }
-function invalidate() {
-  generation++; tested = null; selected = null; saveButton.disabled = true; preview.replaceChildren();
-  selectedText.textContent = 'Test the connection, then choose a cell to use as the source value.'; testStatus.textContent = '';
-}
-for (const input of addForm.querySelectorAll('[data-sheet-setting]')) input.addEventListener('input', invalidate);
-testButton.addEventListener('click', async () => {
-  if (!addForm.reportValidity()) return;
-  invalidate(); const attempt = generation, input = settings(), signature = JSON.stringify(input);
-  testButton.disabled = true; testStatus.textContent = 'Reading public sheet…';
-  try {
-    const result = await request('/api/ycs/data/sheets/test', { settings: input });
-    if (generation !== attempt || signature !== JSON.stringify(settings())) return;
-    tested = { signature, settings: result.settings };
-    testStatus.textContent = 'Connected. Choose a nonempty cell below.'; testStatus.classList.remove('warning');
-    const table = document.createElement('table'); table.setAttribute('aria-label', 'Google Sheets preview');
-    for (const cells of result.rows) {
-      const row = document.createElement('tr');
-      for (const cell of cells) {
-        const td = document.createElement('td'), button = document.createElement('button'); button.type = 'button'; button.className = 'sheet-cell'; button.disabled = !cell.usable;
-        const address = document.createElement('small'); address.textContent = cell.address;
-        const value = document.createElement('span'); value.textContent = cell.value || '—'; button.append(address, value);
-        button.title = cell.usable ? `Use ${cell.address}` : 'Choose a nonempty value of up to 300 characters';
-        button.addEventListener('click', () => {
-          selected = cell.address; saveButton.disabled = false;
-          for (const other of table.querySelectorAll('button')) other.setAttribute('aria-pressed', String(other === button));
-          selectedText.textContent = `${cell.address} → ${cell.value}`;
-        });
-        td.append(button); row.append(td);
-      }
-      table.append(row);
-    }
-    preview.append(table);
-  } catch (error) { if (generation === attempt) { testStatus.textContent = error.message; testStatus.classList.add('warning'); } }
-  finally { testButton.disabled = false; }
-});
-addForm.addEventListener('submit', async event => {
-  event.preventDefault();
-  if (!tested || !selected || tested.signature !== JSON.stringify(settings()) || !documentState) { notice('Test the connection and choose a cell first.', true); return; }
-  saveButton.disabled = true;
-  try {
-    const result = await request('/api/ycs/data/sheets', { label: document.getElementById('sheet-label').value,
-      settings: { ...tested.settings, cell: selected }, revision: documentState.revision });
-    documentState = result.snapshot; render(); invalidate();
-    notice('Google Sheets source added. Assign it under Field mappings, then use the chain in the rundown. Program is unchanged.');
-  } catch (error) { notice(error.message, true); saveButton.disabled = false; }
-});
-document.getElementById('reload').addEventListener('click', () => { drafts.clear(); load().then(() => notice('Saved data reloaded.')).catch(error => notice(error.message, true)); });
-load().catch(error => notice(error.message, true));
-// Live values/status refresh independently of the saved configuration revision,
-// so polling cannot overwrite a manual input or silently accept a stale save.
-let polling = false;
-const timer = setInterval(async () => {
-  if (polling) return; polling = true;
-  try { const latest = await request('/api/ycs/data'); health(latest); updateRemoteCards(latest); }
-  catch { document.getElementById('health').textContent = 'Data service disconnected — saved edits are retained'; }
-  finally { polling = false; }
-}, 2000);
-window.addEventListener('pagehide', () => { generation++; clearInterval(timer); }, { once: true });
+initialize().catch(error => message(error.message, true)); const timer = setInterval(poll, 3000); window.addEventListener('pagehide', () => { disposed = true; clearInterval(timer); }, { once: true });

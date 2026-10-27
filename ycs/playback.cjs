@@ -66,7 +66,7 @@ function descriptor(item, slots, sources) {
   const links = {};
   for (const [field, link] of Object.entries(item.ycsLinks || {})) {
     if (!linkable(item, field)) continue;
-    const source = sources?.mapping(item.ycsStage, item.itemID, field);
+    const source = sources?.mapping(item.ycsStage, item.itemID, field, item.relpath);
     links[field] = { ...link, source };
     if (link.mode === 'linked') data[field] = sources?.value(source) ?? data[field];
   }
@@ -109,7 +109,7 @@ class Playback extends EventEmitter {
   }
   async catalog(stageId) {
     const rundown = await this.repository.read(stageId);
-    return rundown.templates.map(item => ({ id: item.itemID, title: item.description, slot: item.ycsSlot }));
+    return rundown.templates.map(item => ({ id: item.itemID, title: item.description || item.itemID, slot: item.ycsSlot, template: item.relpath, fields: item.DataFields.filter(field => linkable(item, field.field)).map(({ field, title }) => ({ field, title: title || field })) }));
   }
   async editor(stageId, graphicId) {
     await this.sources?.ready;
@@ -117,9 +117,9 @@ class Playback extends EventEmitter {
     const links = {};
     for (const field of item.DataFields) if (linkable(item, field.field)) {
       const saved = item.ycsLinks?.[field.field] || { mode: 'manual', manual: field.value ?? '' };
-      links[field.field] = { ...saved, source: this.sources?.mapping(stageId, graphicId, field.field) || null };
+      links[field.field] = { ...saved, source: this.sources?.mapping(stageId, graphicId, field.field, item.relpath) || null };
     }
-    return { revision: item.ycsEditRevision || 0, fields: clone(item.DataFields), links };
+    return { revision: item.ycsEditRevision || 0, title: item.description || graphicId, template: item.relpath, fields: clone(item.DataFields), links };
   }
   command(stageId, graphicId, action, fields, options = {}) {
     if (!['play', 'stop', 'update', 'preview', 'save', 'continue'].includes(action)) fail('Unknown command');
@@ -137,7 +137,7 @@ class Playback extends EventEmitter {
         const links = clone(item.ycsLinks || {});
         for (const [field, link] of Object.entries(options.links || {})) {
           if (!linkable(item, field) || !link || !['manual', 'linked'].includes(link.mode) || typeof link.manual !== 'string' || link.manual.length > 300) fail('Invalid field link');
-          if (link.mode === 'linked' && !this.sources?.mapping(stageId, graphicId, field)) fail('Assign a source in Data Manager before linking this field', 422);
+          if (link.mode === 'linked' && !this.sources?.mapping(stageId, graphicId, field, item.relpath)) fail('Assign a source in Data Manager before linking this field', 422);
           links[field] = { mode: link.mode, manual: link.manual };
         }
         for (const field of item.DataFields) {
@@ -146,7 +146,7 @@ class Playback extends EventEmitter {
           if (!link) continue;
           const incoming = fields?.find(candidate => candidate.field === field.field);
           if (link.mode === 'manual' && incoming) link.manual = incoming.value;
-          if (link.manual.length > 300) fail('Round text must be at most 300 characters');
+          if (link.manual.length > 300) fail('Linked text must be at most 300 characters');
           // The persisted field remains the manual fallback, not a transient
           // source value copied out of the editor's read-only input.
           checked.DataFields.find(candidate => candidate.field === field.field).value = link.manual;

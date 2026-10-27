@@ -4,223 +4,249 @@ const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { randomUUID, createHash } = require('node:crypto');
 const { PublicSheets, normalizeSettings } = require('./public-sheets.cjs');
+const { selection, resolve } = require('./bindings.cjs');
 const clone = value => structuredClone(value);
 const keyPattern = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$/;
+const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 function fail(message, status = 400) { const error = new Error(message); error.status = status; throw error; }
 function text(value) { return typeof value === 'string' && value.trim().length > 0 && value.length <= 300; }
-function linkable(item, field) { return item.ycsSlot === 'ticker' && field === 'f5' && item.DataFields.some(definition => definition.field === field && definition.ftype === 'textfield'); }
-
+function linkable(item, field) { return item.DataFields.some(definition => definition.field === field && definition.ftype === 'textfield'); }
+function connectionSettings(input) { const settings = normalizeSettings(input); delete settings.cell; return settings; }
+function binding(document, input) {
+  if (input === null) return null;
+  if (input?.source && Object.hasOwn(document.sources, input.source)) return { source: input.source };
+  const connection = Object.hasOwn(document.connections, input?.connection) && document.connections[input.connection];
+  if (!connection) fail('Choose a saved connection');
+  return { connection: input.connection, selection: selection(input.selection, connection.settings) };
+}
 function validate(document) {
-  if (!document || document.version !== 1 || !Number.isSafeInteger(document.revision) || document.revision < 0 || !document.sources || Array.isArray(document.sources) || !Array.isArray(document.mappings)) fail('Invalid local data document');
-  if (Object.keys(document.sources).length > 100 || document.mappings.length > 300) fail('Too many data sources or mappings');
-  for (const [id, source] of Object.entries(document.sources)) {
-    if (!keyPattern.test(id) || !source || !text(source.label)) fail('Source labels must be nonempty text, up to 300 characters');
-    if (source.type === 'google-sheets') {
-      const settings = normalizeSettings(source.settings);
-      if (!settings.cell) fail('Google Sheets sources require a selected cell');
-      if (JSON.stringify(settings) !== JSON.stringify(source.settings)) fail('Invalid Google Sheets source configuration');
-    } else if ((source.type && source.type !== 'local') || !text(source.value)) fail('Local source values must be nonempty text, up to 300 characters');
+  if (!document || document.version !== 2 || !Number.isSafeInteger(document.revision) || document.revision < 0 || !document.sources || Array.isArray(document.sources) || !document.connections || Array.isArray(document.connections) || !Array.isArray(document.mappings) || !Array.isArray(document.defaults)) fail('Invalid local data document');
+  if (Object.keys(document.sources).length > 300 || Object.keys(document.connections).length > 100 || document.mappings.length + document.defaults.length > 1000) fail('Too many data connections or mappings');
+  for (const [id, connection] of Object.entries(document.connections)) {
+    if (!keyPattern.test(id) || !text(connection.label) || connection.type !== 'google-sheets' || JSON.stringify(connectionSettings(connection.settings)) !== JSON.stringify(connection.settings)) fail('Invalid connection');
   }
-  const seen = new Set();
-  for (const mapping of document.mappings) {
-    if (!mapping || !['stage', 'graphic', 'field', 'source'].every(key => typeof mapping[key] === 'string' && keyPattern.test(mapping[key])) || !Object.hasOwn(document.sources, mapping.source)) fail('Invalid data mapping');
-    const id = JSON.stringify([mapping.stage, mapping.graphic, mapping.field]);
-    if (seen.has(id)) fail('Duplicate field mapping');
-    seen.add(id);
+  for (const [id, source] of Object.entries(document.sources)) {
+    if (!keyPattern.test(id) || !source || !text(source.label)) fail('Invalid source label');
+    if (source.type === 'connection-value') binding(document, source.binding);
+    else if ((source.type && source.type !== 'local') || !text(source.value)) fail('Local values must be nonempty text, up to 300 characters');
+  }
+  for (const [list, owner] of [[document.mappings, 'graphic'], [document.defaults, 'template']]) {
+    const seen = new Set();
+    for (const mapping of list) {
+      if (!mapping || typeof mapping.stage !== 'string' || !keyPattern.test(mapping.stage) || typeof mapping.field !== 'string' || !keyPattern.test(mapping.field) || typeof mapping[owner] !== 'string' || !mapping[owner] || mapping[owner].length > 500 || (owner === 'graphic' && !keyPattern.test(mapping.graphic))) fail('Invalid mapping');
+      if (mapping.source) { if (!Object.hasOwn(document.sources, mapping.source)) fail('Unknown source'); }
+      else binding(document, mapping.binding);
+      const key = JSON.stringify([mapping.stage, mapping[owner], mapping.field]);
+      if (seen.has(key)) fail('Duplicate field mapping'); seen.add(key);
+    }
   }
   return document;
 }
-
-// Source reads and credential handling belong to the server. Templates receive
-// resolved SPX fields, so additional adapters will not require template changes.
+function migrate(input) {
+  if (input?.version !== 1) return input;
+  const document = clone(input); document.version = 2; document.connections = {}; document.defaults = [];
+  for (const source of Object.values(document.sources)) if (source.type === 'google-sheets') {
+    const settings = connectionSettings(source.settings), id = 'sheet.' + hash(settings).slice(0, 24);
+    document.connections[id] ||= { type: 'google-sheets', label: source.label, settings };
+    source.binding = { connection: id, selection: { kind: 'cell', cell: source.settings.cell } };
+    source.type = 'connection-value'; delete source.settings;
+  }
+  for (const mapping of document.mappings) if (document.sources[mapping.source]?.binding) { mapping.binding = clone(document.sources[mapping.source].binding); delete mapping.source; }
+  return validate(document);
+}
 class DataSources extends EventEmitter {
   constructor(file, stages, { sheets = new PublicSheets(), now = Date.now } = {}) {
-    super();
-    this.file = path.resolve(file);
-    this.stages = stages;
-    this.sheets = sheets;
-    this.now = now;
-    this.runtimes = new Map();
-    this.inFlight = new Map();
-    this.controllers = new Set();
-    this.cache = {};
+    super(); Object.assign(this, { file: path.resolve(file), stages, sheets, now, error: '', document: null, checkedAt: null, closed: false });
+    this.runtimes = new Map(); this.bindings = new Map(); this.good = {}; this.inFlight = new Map(); this.controllers = new Set();
     this.cacheFile = this.file.replace(/\.json$/i, '') + '.sheets-cache.json';
-    this.cacheSerial = Promise.resolve();
-    this.closed = false;
-    this.document = null;
-    this.error = '';
-    this.checkedAt = null;
-    this.serial = Promise.resolve();
-    this.ready = this.initialize().catch(() => {
-      this.error = 'Local JSON source unavailable or invalid; retaining last valid values';
-      this.checkedAt = new Date().toISOString();
-    });
+    this.cache = {}; this.serial = Promise.resolve(); this.cacheSerial = Promise.resolve(); this.activeReferences = () => [];
+    this.ready = this.initialize().catch(() => { this.error = 'Local JSON source unavailable or invalid; retaining last valid values'; });
   }
   async initialize() {
-    const initial = { version: 1, revision: 0, updatedAt: new Date().toISOString(), sources: {}, mappings: [] };
+    const initial = { version: 2, revision: 0, sources: {}, connections: {}, mappings: [], defaults: [] };
     for (const stage of this.stages) {
       const id = `test.${stage.id}.currentRound`;
       initial.sources[id] = { label: `${stage.title || stage.id} · Current round`, value: 'SWISS ROUND 11 OF 15' };
       initial.mappings.push({ stage: stage.id, graphic: 'ticker', field: 'f5', source: id });
     }
     await fs.mkdir(path.dirname(this.file), { recursive: true });
-    try { await fs.writeFile(this.file, JSON.stringify(initial, null, 2), { flag: 'wx' }); }
-    catch (error) { if (error.code !== 'EEXIST') throw error; }
+    try { await fs.writeFile(this.file, JSON.stringify(initial, null, 2), { flag: 'wx' }); } catch (error) { if (error.code !== 'EEXIST') throw error; }
     try {
       const raw = await fs.readFile(this.cacheFile, 'utf8');
-      if (raw.length < 262144) {
-        const cache = JSON.parse(raw);
-        if (cache.version === 1 && cache.values && typeof cache.values === 'object') this.cache = cache.values;
+      if (raw.length < 4194304) { const cache = JSON.parse(raw); if (cache.version === 2) { this.cache = cache.connections || {}; this.good = Object.fromEntries(Object.entries(cache.good || {}).filter(([key, value]) => key.startsWith('bind.') && text(value))); } else this.legacyCache = cache.values; }
+    } catch { /* Cache is optional; manual fields remain usable. */ }
+    const original = await fs.readFile(this.file, 'utf8');
+    const parsed = JSON.parse(original.replace(/^\uFEFF/, ''));
+    if (parsed.version === 1) {
+      const next = migrate(parsed); this.document = next;
+      await fs.writeFile(this.file + '.v1-backup.json', original, { flag: 'wx' }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+      await fs.writeFile(this.file + '.tmp', JSON.stringify(next, null, 2)); await fs.rename(this.file + '.tmp', this.file);
+      for (const [id, source] of Object.entries(parsed.sources)) {
+        const saved = this.legacyCache?.[id];
+        if (saved?.fingerprint === hash(source.settings) && text(saved.value) && next.sources[id].binding) this.good[this.reference(next.sources[id].binding)] = saved.value;
       }
-    } catch { /* A cache is optional; the manual field remains the fallback. */ }
+    }
     await this.read();
   }
-  queue(operation) {
-    const result = this.serial.then(operation);
-    this.serial = result.catch(() => {});
-    return result;
-  }
+  queue(operation) { const result = this.serial.then(operation); this.serial = result.catch(() => {}); return result; }
   async read() {
     const previous = JSON.stringify([this.document, this.error]);
     try {
-      const raw = await fs.readFile(this.file, 'utf8');
-      if (raw.length > 262144) fail('Local data file is too large');
+      const raw = await fs.readFile(this.file, 'utf8'); if (raw.length > 1048576) fail('Local data file is too large');
       const next = clone(validate(JSON.parse(raw.replace(/^\uFEFF/, ''))));
-      if (this.document && (next.revision < this.document.revision || (next.revision === this.document.revision && JSON.stringify(next) !== JSON.stringify(this.document)))) fail('External source edits must advance the document revision');
-      this.document = next;
-      this.syncRuntimes();
-      this.error = '';
-    } catch (error) {
-      // Keep the last complete valid snapshot; never replace good data with an
-      // empty value or a partly written external JSON document.
-      this.error = 'Local JSON source unavailable or invalid; retaining last valid values';
-    }
-    this.checkedAt = new Date().toISOString();
-    if (previous !== JSON.stringify([this.document, this.error])) this.emit('change');
-    return this.snapshot();
+      if (this.document && (next.revision < this.document.revision || (next.revision === this.document.revision && JSON.stringify(next) !== JSON.stringify(this.document)))) fail('External edits must advance the revision');
+      this.document = next; this.syncRuntimes(); this.error = '';
+    } catch { this.error = 'Local JSON source unavailable or invalid; retaining last valid values'; }
+    this.checkedAt = new Date().toISOString(); if (previous !== JSON.stringify([this.document, this.error])) this.emit('change'); return this.snapshot();
   }
   refresh() { return this.queue(async () => { await this.ready; return this.read(); }); }
-  fingerprint(source) { return createHash('sha256').update(JSON.stringify(source.settings)).digest('hex'); }
   syncRuntimes() {
-    for (const [id, source] of Object.entries(this.document?.sources || {})) {
-      if (source.type !== 'google-sheets') continue;
-      const fingerprint = this.fingerprint(source), current = this.runtimes.get(id);
-      if (current?.fingerprint === fingerprint) continue;
-      const saved = this.cache[id];
-      const reusable = saved?.fingerprint === fingerprint && text(saved.value) && typeof saved.lastSuccess === 'string' && Number.isFinite(Date.parse(saved.lastSuccess));
-      this.runtimes.set(id, { fingerprint, value: reusable ? saved.value : undefined, lastSuccess: reusable ? saved.lastSuccess : null, lastAttempt: null, nextAt: 0, failures: 0, health: 'loading', error: '' });
+    for (const [id, connection] of Object.entries(this.document.connections)) {
+      const fingerprint = hash(connection.settings); if (this.runtimes.get(id)?.fingerprint === fingerprint) continue;
+      let saved = this.cache[id];
+      if (!Array.isArray(saved?.rows) || saved.rows.length > 200 || saved.rows.some(row => !Array.isArray(row) || row.length > 32 || row.some(cell => !cell || typeof cell.address !== 'string' || typeof cell.value !== 'string'))) saved = undefined;
+      this.runtimes.set(id, { fingerprint, rows: saved?.fingerprint === fingerprint ? saved.rows : undefined, lastSuccess: saved?.fingerprint === fingerprint ? saved.lastSuccess : null, lastAttempt: null, nextAt: 0, failures: 0, health: 'loading', error: '' });
     }
-    for (const id of this.runtimes.keys()) if (this.document?.sources[id]?.type !== 'google-sheets') this.runtimes.delete(id);
+    for (const id of this.runtimes.keys()) if (!this.document.connections[id]) this.runtimes.delete(id);
   }
-  sourceSnapshot(id, source) {
-    if (source.type !== 'google-sheets') return { ...source, type: 'local', health: this.error ? 'error' : 'ok' };
-    const runtime = this.runtimes.get(id);
-    const stale = !runtime?.lastSuccess || this.now() - Date.parse(runtime.lastSuccess) > source.settings.refreshSeconds * 2000;
-    return { ...source, value: runtime?.value, health: this.error ? 'error' : runtime?.health === 'ok' && stale ? 'stale' : runtime?.health || 'loading',
-      lastSuccess: runtime?.lastSuccess || null, lastAttempt: runtime?.lastAttempt || null,
-      nextRefresh: runtime?.nextAt ? new Date(runtime.nextAt).toISOString() : null,
-      error: runtime?.error || '', warning: runtime?.cacheError || '' };
+  reference(input) {
+    if (!input) return;
+    if (input.source) return input.source;
+    const settings = this.document?.connections[input.connection]?.settings;
+    // Pin connection settings as well as selection. Old program bindings never
+    // silently adopt an edited target or a newly saved field mapping.
+    const record = { ...input, target: settings && { url: settings.url, worksheet: settings.worksheet, range: settings.range } };
+    const id = 'bind.' + hash(record); this.bindings.set(id, record); return id;
+  }
+  effective(stage, graphic, field, template) {
+    const override = this.document?.mappings.find(item => item.stage === stage && item.graphic === graphic && item.field === field);
+    const fallback = this.document?.defaults.find(item => item.stage === stage && item.template === template && item.field === field);
+    const mapping = override || fallback;
+    return { binding: mapping?.source ? { source: mapping.source } : mapping?.binding || null, origin: override ? 'override' : fallback ? 'default' : 'unassigned' };
+  }
+  mapping(stage, graphic, field, template) { return this.reference(this.effective(stage, graphic, field, template).binding); }
+  resolveSnapshot(id) {
+    const source = this.document?.sources[id];
+    if (source && source.type !== 'connection-value') return { ...source, type: 'local', health: this.error ? 'error' : 'ok' };
+    const input = source?.binding || this.bindings.get(id);
+    if (!input) return { health: 'error', error: 'Source unavailable' };
+    const ref = source ? this.reference(input) : id, runtime = this.runtimes.get(input.connection), connection = this.document?.connections[input.connection];
+    let error = '';
+    try {
+      if (input.target && JSON.stringify(input.target) !== JSON.stringify(connection && { url: connection.settings.url, worksheet: connection.settings.worksheet, range: connection.settings.range })) throw new Error('Connection target changed; committed link retained');
+      this.good[ref] = resolve(runtime?.rows, input.selection);
+    } catch (problem) { error = problem.message; }
+    const status = connection ? this.connectionSnapshot(input.connection, connection) : { health: 'error', error: 'Connection unavailable' };
+    return { ...source, binding: input, value: this.good[ref], label: source?.label || connection?.label, type: source?.type || 'connection-value', health: error ? 'error' : status.health, error: error || status.error, lastSuccess: status.lastSuccess, lastAttempt: status.lastAttempt, nextRefresh: status.nextRefresh, warning: status.warning };
+  }
+  value(id) { return id ? this.resolveSnapshot(id).value : undefined; }
+  connectionSnapshot(id, connection) {
+    const runtime = this.runtimes.get(id), stale = !runtime?.lastSuccess || this.now() - Date.parse(runtime.lastSuccess) > connection.settings.refreshSeconds * 2000;
+    return { ...connection, rows: runtime?.rows || [], health: this.error ? 'error' : runtime?.health === 'ok' && stale ? 'stale' : runtime?.health || 'loading', lastSuccess: runtime?.lastSuccess || null, lastAttempt: runtime?.lastAttempt || null, nextRefresh: runtime?.nextAt ? new Date(runtime.nextAt).toISOString() : null, error: runtime?.error || '', warning: runtime?.cacheError || '' };
   }
   snapshot() {
-    const document = this.document || { version: 1, revision: 0, sources: {}, mappings: [] };
-    return clone({ ...document, sources: Object.fromEntries(Object.entries(document.sources).map(([id, source]) => [id, this.sourceSnapshot(id, source)])), health: this.error ? 'unavailable' : 'ok', error: this.error, checkedAt: this.checkedAt });
+    const document = this.document || { version: 2, revision: 0, sources: {}, connections: {}, defaults: [], mappings: [] };
+    for (const entry of [...document.mappings, ...document.defaults]) if (entry.binding) this.reference(entry.binding);
+    const sources = Object.fromEntries([...new Set([...Object.keys(document.sources), ...this.bindings.keys()])].map(id => [id, this.resolveSnapshot(id)]));
+    return clone({ ...document, mappings: document.mappings.map(item => ({ ...item, source: item.source || this.reference(item.binding) })), defaults: document.defaults.map(item => ({ ...item, source: this.reference(item.binding) })), sources, connections: Object.fromEntries(Object.entries(document.connections).map(([id, value]) => [id, { ...this.connectionSnapshot(id, value), usages: this.usages(id) }])), health: this.error ? 'unavailable' : 'ok', error: this.error, checkedAt: this.checkedAt });
   }
-  mapping(stage, graphic, field) { return this.document?.mappings.find(mapping => mapping.stage === stage && mapping.graphic === graphic && mapping.field === field)?.source; }
-  value(id) { return this.document?.sources[id]?.type === 'google-sheets' ? this.runtimes.get(id)?.value : this.document?.sources[id]?.value; }
+  usages(id) {
+    const result = [];
+    const uses = entry => { const pick = entry.binding || this.document?.sources[entry.source]?.binding; return pick?.connection === id; };
+    for (const item of this.document?.mappings || []) if (uses(item)) result.push({ stage: item.stage, graphic: item.graphic, field: item.field, kind: 'mapping' });
+    for (const item of this.document?.defaults || []) if (uses(item)) result.push({ stage: item.stage, template: item.template, field: item.field, kind: 'default' });
+    for (const item of this.activeReferences()) if (uses({ binding: this.document?.sources[item.source]?.binding || this.bindings.get(item.source) })) result.push({ ...item, kind: 'on-air' });
+    return result;
+  }
   edit(expectedRevision, operation) {
     return this.queue(async () => {
-      await this.ready;
-      await this.read();
-      if (this.error) fail('Repair the local JSON source before saving changes', 503);
-      if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== this.document.revision) fail('Data changed elsewhere. Reload the Data Manager before saving.', 409);
-      const next = clone(this.document);
-      operation(next);
-      validate(next);
-      next.revision++;
-      next.updatedAt = new Date().toISOString();
-      await fs.writeFile(this.file + '.tmp', JSON.stringify(next, null, 2));
-      await fs.rename(this.file + '.tmp', this.file);
-      this.document = next;
-      this.syncRuntimes();
-      this.checkedAt = next.updatedAt;
-      this.emit('change');
-      return this.snapshot();
+      await this.ready; await this.read(); if (this.error) fail('Repair the local JSON source before saving changes', 503);
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== this.document.revision) fail('Data changed elsewhere. Reload saved data before saving.', 409);
+      const next = clone(this.document); operation(next); validate(next); next.revision++; next.updatedAt = new Date().toISOString();
+      await fs.writeFile(this.file + '.tmp', JSON.stringify(next, null, 2)); await fs.rename(this.file + '.tmp', this.file);
+      this.document = next; this.syncRuntimes(); this.checkedAt = next.updatedAt; this.emit('change'); return this.snapshot();
     });
   }
-  updateSource(id, value, revision) {
+  updateSource(id, value, revision) { return this.edit(revision, next => { if (!Object.hasOwn(next.sources, id)) fail('Unknown source', 404); if (next.sources[id].type === 'connection-value') fail('Sheet values are read-only', 422); if (!text(value)) fail('Enter nonempty text, up to 300 characters'); next.sources[id].value = value; }); }
+  updateMapping(mapping, revision) { return this.edit(revision, next => { const index = next.mappings.findIndex(item => item.stage === mapping.stage && item.graphic === mapping.graphic && item.field === mapping.field); if (index < 0) next.mappings.push(mapping); else next.mappings[index] = mapping; }); }
+  saveMappings(stage, graphic, template, edits, revision) {
+    if (!Array.isArray(edits) || edits.length > 100 || new Set(edits.map(edit => edit.field)).size !== edits.length) fail('Invalid field mappings');
     return this.edit(revision, next => {
-      if (!Object.hasOwn(next.sources, id)) fail('Unknown source', 404);
-      if (next.sources[id].type === 'google-sheets') fail('Google Sheets sources are read-only; edit the source cell in Google Sheets', 422);
-      if (!text(value)) fail('Round text must be nonempty, up to 300 characters');
-      next.sources[id].value = value;
-    });
-  }
-  updateMapping(mapping, revision) {
-    return this.edit(revision, next => {
-      const index = next.mappings.findIndex(item => item.stage === mapping.stage && item.graphic === mapping.graphic && item.field === mapping.field);
-      if (index < 0) next.mappings.push(mapping); else next.mappings[index] = mapping;
+      for (const edit of edits) {
+        next.mappings = next.mappings.filter(item => !(item.stage === stage && item.graphic === graphic && item.field === edit.field));
+        if (edit.scope === 'inherit') continue;
+        const pick = binding(next, edit.binding);
+        if (edit.scope === 'default') {
+          next.defaults = next.defaults.filter(item => !(item.stage === stage && item.template === template && item.field === edit.field));
+          next.defaults.push({ stage, template, field: edit.field, binding: pick });
+        } else if (edit.scope === 'override') next.mappings.push({ stage, graphic, field: edit.field, binding: pick });
+        else fail('Choose template default or graphic override');
+      }
     });
   }
   async persistCache() {
-    const values = Object.fromEntries([...this.runtimes].filter(([, runtime]) => text(runtime.value) && runtime.lastSuccess).map(([id, runtime]) => [id, { fingerprint: runtime.fingerprint, value: runtime.value, lastSuccess: runtime.lastSuccess }]));
-    const raw = JSON.stringify({ version: 1, values }, null, 2);
-    const write = this.cacheSerial.catch(() => {}).then(async () => { await fs.writeFile(this.cacheFile + '.tmp', raw); await fs.rename(this.cacheFile + '.tmp', this.cacheFile); });
-    this.cacheSerial = write;
-    await write;
-    this.cache = values;
+    // Resolve all registered bindings before saving the restart fallback.
+    for (const id of [...Object.keys(this.document.sources), ...this.bindings.keys()]) this.value(id);
+    const connections = Object.fromEntries([...this.runtimes].filter(([, runtime]) => runtime.rows && runtime.lastSuccess).map(([id, runtime]) => [id, { fingerprint: runtime.fingerprint, rows: runtime.rows, lastSuccess: runtime.lastSuccess }]));
+    const raw = JSON.stringify({ version: 2, connections, good: this.good });
+    this.cacheSerial = this.cacheSerial.catch(() => {}).then(async () => { await fs.writeFile(this.cacheFile + '.tmp', raw); await fs.rename(this.cacheFile + '.tmp', this.cacheFile); });
+    await this.cacheSerial; this.cache = connections;
   }
-  async testSheet(settings) { return this.sheets.read(normalizeSettings(settings)); }
+  testSheet(settings) { return this.sheets.read(connectionSettings(settings)); }
+  async saveConnection(id, label, input, revision) {
+    if (!text(label)) fail('Enter a connection name, up to 300 characters');
+    const settings = connectionSettings(input), result = await this.sheets.read(settings);
+    if (!Array.isArray(result.rows)) fail('Connection returned invalid rows', 502);
+    id ||= 'sheet.' + randomUUID();
+    await this.edit(revision, next => {
+      if (next.connections[id] && JSON.stringify({ ...next.connections[id].settings, refreshSeconds: 0 }) !== JSON.stringify({ ...settings, refreshSeconds: 0 }) && this.usages(id).length) fail('This connection is in use. Add a new connection and remap its fields before changing its target.', 409);
+      next.connections[id] = { type: 'google-sheets', label: label.trim(), settings };
+    });
+    this.acceptRead(id, result.rows); await this.persistCache().catch(() => { this.runtimes.get(id).cacheError = 'Live data is available, but its restart cache could not be saved'; }); this.emit('change');
+    return { connectionId: id, snapshot: this.snapshot() };
+  }
+  removeConnection(id, revision) { return this.edit(revision, next => {
+    if (!next.connections[id]) fail('Unknown connection', 404);
+    if (this.usages(id).length) fail('Remove saved field mappings and stop linked on-air graphics before removing this connection', 409);
+    for (const [key, source] of Object.entries(next.sources)) if (source.binding?.connection === id) delete next.sources[key];
+    delete next.connections[id];
+  }); }
+  // Compatibility endpoint for existing cell-source integrations. New UI saves
+  // connections once and stores field selectors directly on each mapping.
   async addSheet(label, input, revision) {
-    if (!text(label)) fail('Enter a source name, up to 300 characters');
-    const settings = normalizeSettings(input);
-    if (!settings.cell) fail('Test the connection and choose a cell first');
-    // Re-read the selected cell instead of trusting browser preview data.
-    const read = await this.sheets.read(settings, { singleCell: true });
-    const id = 'google.' + randomUUID();
-    await this.edit(revision, next => { next.sources[id] = { type: 'google-sheets', label: label.trim(), settings }; });
-    const runtime = this.runtimes.get(id), now = this.now();
-    Object.assign(runtime, { value: read.value, lastSuccess: new Date(now).toISOString(), lastAttempt: new Date(now).toISOString(), nextAt: now + settings.refreshSeconds * 1000, health: 'ok' });
-    try { await this.persistCache(); } catch { runtime.cacheError = 'Value is live, but its restart cache could not be saved'; }
-    this.emit('change');
-    return { sourceId: id, snapshot: this.snapshot() };
+    const settings = normalizeSettings(input); if (!settings.cell) fail('Choose a cell first');
+    const added = await this.saveConnection(null, label, settings, revision), sourceId = 'google.' + randomUUID();
+    await this.edit(added.snapshot.revision, next => { next.sources[sourceId] = { type: 'connection-value', label, binding: { connection: added.connectionId, selection: { kind: 'cell', cell: settings.cell } } }; });
+    await this.persistCache(); return { sourceId, snapshot: this.snapshot() };
   }
+  acceptRead(id, rows) { const runtime = this.runtimes.get(id), now = this.now(); Object.assign(runtime, { rows, lastSuccess: new Date(now).toISOString(), lastAttempt: new Date(now).toISOString(), failures: 0, health: 'ok', error: '', cacheError: '', nextAt: now + this.document.connections[id].settings.refreshSeconds * 1000 }); }
   async refreshSheet(id) {
-    await this.ready;
-    if (this.closed) return;
-    const source = this.document?.sources[id];
-    if (source?.type !== 'google-sheets') fail('Unknown Google Sheets source', 404);
+    await this.ready; if (this.closed) return;
+    id = this.document?.sources[id]?.binding?.connection || id;
+    const connection = this.document?.connections[id]; if (!connection) fail('Unknown sheet connection', 404);
     if (this.inFlight.has(id)) return this.inFlight.get(id);
-    const runtime = this.runtimes.get(id), controller = new AbortController();
-    this.controllers.add(controller);
+    const runtime = this.runtimes.get(id), controller = new AbortController(); this.controllers.add(controller);
     const job = (async () => {
       runtime.lastAttempt = new Date(this.now()).toISOString();
       try {
-        const result = await this.sheets.read(source.settings, { singleCell: true, signal: controller.signal });
+        const result = await this.sheets.read(connection.settings, { signal: controller.signal });
         if (this.closed || this.runtimes.get(id) !== runtime) return;
-        Object.assign(runtime, { value: result.value, lastSuccess: new Date(this.now()).toISOString(), failures: 0, health: 'ok', error: '', cacheError: '', nextAt: this.now() + source.settings.refreshSeconds * 1000 });
-        try { await this.persistCache(); } catch { runtime.cacheError = 'Value is live, but its restart cache could not be saved'; }
+        if (!Array.isArray(result.rows)) fail('Connection returned invalid rows', 502);
+        this.acceptRead(id, result.rows);
+        try { await this.persistCache(); } catch { runtime.cacheError = 'Live data is available, but its restart cache could not be saved'; }
       } catch (error) {
         if (this.closed || this.runtimes.get(id) !== runtime) return;
-        runtime.failures++;
-        runtime.health = 'error'; runtime.error = error.message;
-        runtime.nextAt = this.now() + Math.min(3600, source.settings.refreshSeconds * 2 ** Math.min(runtime.failures - 1, 6)) * 1000;
+        runtime.failures++; runtime.health = 'error'; runtime.error = error.message;
+        runtime.nextAt = this.now() + Math.min(3600, connection.settings.refreshSeconds * 2 ** Math.min(runtime.failures - 1, 6)) * 1000;
       } finally { this.controllers.delete(controller); }
-      if (!this.closed && this.runtimes.get(id) === runtime) this.emit('change');
-      return this.snapshot();
+      if (!this.closed && this.runtimes.get(id) === runtime) this.emit('change'); return this.snapshot();
     })();
-    this.inFlight.set(id, job);
-    try { return await job; } finally { if (this.inFlight.get(id) === job) this.inFlight.delete(id); }
+    this.inFlight.set(id, job); try { return await job; } finally { if (this.inFlight.get(id) === job) this.inFlight.delete(id); }
   }
   async pollSheets() {
-    await this.ready;
-    if (this.polling || this.closed || this.error) return;
-    this.polling = true;
-    try {
-      const due = [...this.runtimes].filter(([, runtime]) => runtime.nextAt <= this.now()).map(([id]) => id);
-      for (let index = 0; index < due.length && !this.closed; index += 4) await Promise.allSettled(due.slice(index, index + 4).map(id => this.refreshSheet(id)));
-    } finally { this.polling = false; }
+    await this.ready; if (this.polling || this.closed || this.error) return; this.polling = true;
+    try { const due = [...this.runtimes].filter(([, value]) => value.nextAt <= this.now()).map(([id]) => id); for (let index = 0; index < due.length && !this.closed; index += 4) await Promise.allSettled(due.slice(index, index + 4).map(id => this.refreshSheet(id))); } finally { this.polling = false; }
   }
   close() { this.closed = true; for (const controller of this.controllers) controller.abort(); }
 }
-
-module.exports = { DataSources, linkable, validate };
+module.exports = { DataSources, linkable, validate, migrate };

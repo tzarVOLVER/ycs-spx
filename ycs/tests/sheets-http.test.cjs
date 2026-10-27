@@ -36,4 +36,21 @@ test('public Sheets HTTP workflow tests and maps a source without autoplay, then
   assert.equal(playback.snapshot('stage-1', 'program').graphics[0].data.f5, 'NEXT SHEET ROUND');
   assert.equal(playback.snapshot('stage-2', 'program').graphics.length, 0);
   assert.equal((await post('/api/ycs/data/source', { id: sourceId, value: 'CANNOT WRITE BACK', revision: snapshot.revision + 1 })).status, 422);
+  const current = await fetch(base + '/api/ycs/data').then(response => response.json());
+  const connectionResponse = await post('/api/ycs/data/connections', { label: 'Shared dataset', settings, revision: current.revision });
+  assert.equal(connectionResponse.status, 200); const added = await connectionResponse.json();
+  const mappingUrl = '/api/ycs/data/mappings/stage-1/ticker';
+  const editor = await fetch(base + mappingUrl).then(response => response.json());
+  assert.deepEqual(editor.fields.map(field => field.field), ['f5']);
+  assert.equal((await post(mappingUrl, { revision: editor.revision, edits: [{ field: 'f0', scope: 'override', binding: null }] })).status, 422);
+  const saved = await post(mappingUrl, { revision: editor.revision, edits: [{ field: 'f5', scope: 'override', binding: { connection: added.connectionId, selection: { kind: 'cell', cell: 'A2' } } }] });
+  assert.equal(saved.status, 200); const mapped = await saved.json();
+  assert.equal((await post(mappingUrl, { revision: editor.revision, edits: [] })).status, 409);
+  assert.equal((await post(`/api/ycs/data/connections/${added.connectionId}/remove`, { revision: mapped.revision })).status, 409);
+  assert.equal((await post('/api/ycs/data/connections', { id: added.connectionId, label: 'Retarget', settings: { ...settings, worksheet: '43' }, revision: mapped.revision })).status, 409);
+  const unmappedResponse = await post(mappingUrl, { revision: mapped.revision, edits: [{ field: 'f5', scope: 'override', binding: null }] });
+  const unmapped = await unmappedResponse.json();
+  assert.equal((await post(`/api/ycs/data/connections/${added.connectionId}/remove`, { revision: unmapped.revision })).status, 200);
+  assert.equal(playback.snapshot('stage-1', 'program').graphics[0].data.f5, 'NEXT SHEET ROUND', 'mapping changes and connection removal never replace the committed program binding');
+
 });

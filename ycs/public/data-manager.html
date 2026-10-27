@@ -1,20 +1,21 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>YCS · Data Manager</title><link rel="stylesheet" href="/ycs/data-manager.css"><script type="module" src="/ycs/data-manager.js"></script></head>
-<body><header><div class="brand">SPX / YCS</div><h1>Data Manager <span>PUBLIC SHEETS</span></h1><nav aria-label="Stage rundowns" id="stages"></nav></header>
-<main><p class="intro">Connect a public Google Sheet or use a local test value. Assign a source to a stage’s Current round field, then choose linked or manual text in its rundown.</p>
-<div class="toolbar"><p id="health" role="status">Connecting…</p><button id="reload" type="button">Reload saved data</button></div>
+<body><header><a class="brand" href="/">SPX <span>/ YCS</span></a><h1>Data Manager</h1><nav id="stages" aria-label="Stage rundowns"></nav></header>
+<main><div class="page-heading"><div><h2>Show data</h2><p>Connect once. Reuse the data across your graphics and stages.</p></div><span id="health" class="status" role="status">Connecting…</span></div>
+<div class="tabs" role="tablist" aria-label="Data Manager"><button id="sources-tab" role="tab" aria-selected="true" aria-controls="sources-view">Sources</button><button id="mappings-tab" role="tab" aria-selected="false" aria-controls="mappings-view">Mappings</button></div>
 <p id="message" role="status"></p>
-<section><h2>Add a public Google Sheets source</h2><p>The sheet must allow Anyone with the link to view it. No Google sign-in or API key is needed. This connector only reads the sheet.</p>
-<form id="add-sheet"><div class="sheet-settings">
-<label>Source name<input id="sheet-label" maxlength="300" required placeholder="Stage 1 · Current round"></label>
-<label class="full-width">Spreadsheet URL<input id="sheet-url" data-sheet-setting type="url" required placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=…"></label>
-<label>Worksheet name or gid<input id="sheet-worksheet" data-sheet-setting maxlength="100" placeholder="Use the tab from the URL"></label>
-<label>Preview range<input id="sheet-range" data-sheet-setting value="A1:D4" required placeholder="A1:D4"></label>
-<label>Refresh interval (seconds)<input id="sheet-refresh" data-sheet-setting type="number" min="5" max="3600" value="5" required></label></div>
-<button id="test-sheet" type="button">Test connection</button><p id="sheet-test-status" role="status"></p>
-<div id="sheet-preview" class="sheet-preview"></div><p id="selected-cell" role="status">Test the connection, then choose a cell to use as the source value.</p>
-<button id="save-sheet" type="submit" disabled>Add source</button></form></section>
-<section><h2>Sources</h2><p>Committed linked fields follow source changes automatically. Local values can be published here; Google Sheets values are read-only.</p><div id="sources"></div></section>
-<section><h2>Field mappings</h2><p>Mapping changes are pending for program until the next Play or Update. The current test supports the ticker’s Current round field.</p><div id="mappings"></div></section>
-<footer>Failed or empty reads retain the last valid value. Google’s caching can add delay beyond the refresh interval. Private Google Sheets and general HTTP API sources are not connected in this version.</footer></main></body></html>
+<section id="sources-view" role="tabpanel" aria-labelledby="sources-tab"><div class="section-heading"><div><h2>Connections</h2><p>Public Google Sheets · automatic background refresh</p></div><button id="add-connection" class="primary">Add connection</button></div><div id="connections"></div>
+<details class="local-tools"><summary>Local test values</summary><p>For testing without an external source. Changes publish to fields already linked on air.</p><div id="local-sources"></div></details>
+<p class="hint">Failed reads keep the last valid value. Google may cache responses beyond your refresh interval. API connectors can be added through the same server adapter interface.</p></section>
+<section id="mappings-view" role="tabpanel" aria-labelledby="mappings-tab" hidden><div class="section-heading"><div><h2>Field mappings</h2><p>Choose data here, then use the chain button in the rundown to link or override a field.</p></div></div>
+<div class="filters"><label>Stage<select id="mapping-stage"></select></label><label>Graphic<select id="mapping-graphic"></select></label><button id="reload-mappings">Reload saved mappings</button></div>
+<p id="mapping-context" class="hint"></p><div id="mapping-fields"></div><div class="save-bar"><span id="mapping-status" role="status">Select a graphic.</span><button id="save-mappings" class="primary" disabled>Save mappings</button></div><p class="hint">Saved mappings affect the next Preview, Play or Update. An on-air graphic keeps its committed links until you update it. Template defaults are shared by copies of the same template within this stage.</p></section>
+</main>
+<dialog id="connection-dialog"><form id="connection-form"><div class="section-heading"><h2 id="connection-title">Add connection</h2><button type="button" id="close-connection" aria-label="Close connection editor">✕</button></div><p>Use a sheet shared with “Anyone with the link” as Viewer. No sign-in or API key.</p>
+<label>Connection name<input id="sheet-label" maxlength="300" required placeholder="Tournament data"></label>
+<label>Google Sheets URL<input id="sheet-url" data-setting type="url" required placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=…"></label>
+<div class="filters"><label>Worksheet name or gid<input id="sheet-worksheet" data-setting maxlength="100" placeholder="Use tab from URL"></label><label>Data range<input id="sheet-range" data-setting value="A1:D4" required placeholder="A1:D4"></label></div>
+<details><summary>Refresh settings</summary><label>Refresh every (seconds)<input id="sheet-refresh" data-setting type="number" min="5" max="3600" value="5" required></label><p class="hint">Up to 200 rows × 32 columns. Choose only the data this show needs.</p></details>
+<div class="toolbar"><button id="test-sheet" type="button">Test connection</button><span id="sheet-test-status" role="status"></span></div><div id="sheet-preview" class="sheet-preview"></div><p id="connection-usage" class="hint"></p><div class="dialog-actions"><button id="save-sheet" type="submit" class="primary" disabled>Save connection</button></div></form></dialog>
+</body></html>

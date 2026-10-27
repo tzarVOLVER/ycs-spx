@@ -38,48 +38,70 @@ Open a controller URL with the base address `http://127.0.0.1:5660`. Select the 
 
 Native Save changes the stage's saved fields. Typing previews pending values; Update commits them to an active program graphic. Updating a stopped graphic saves its data without putting it on air. STOP THIS STAGE clears only that stage. Configured stage playout/save requests bypass upstream's shared rundown cache. Legacy projects outside the configured stage list retain upstream behavior.
 
-## Current round data-link test
+## Data Manager and rundown workflow
 
-The **Data Manager** link in the stage panel opens `/ycs/data-manager` in this server. It contains editable local sources, public Google Sheets sources and stage-specific mappings for the ticker's **Current round (`f5`)**. Multiple stages may map to the same source, or use separate sources. Private Sheets and general HTTP API adapters are not implemented yet.
+Open **Data Manager** from any stage panel. It has two views:
 
-1. Open a stage rundown and double-click the ticker to open its fields.
-2. Enter a manual Current round value. Click its gray chain button to link it. The chain turns green, the field becomes read-only, and preview shows the mapped source value. Program is unchanged.
-3. **Play** (or **Update** for an active ticker) commits the link to program. Later source changes update that field automatically without restarting the ticker or its crawler.
-4. Open Data Manager, edit the stage's source text and click **Publish source**. A linked preview/program updates within roughly two seconds. Manual fields do not follow it.
-5. Click the chain again to restore the saved manual text. This is a pending preview edit. If program was linked, it continues following its committed source until **Update** applies the manual override.
-6. **Save** stores manual text and link mode without changing program. Reloading the rundown restores those saved settings. Unsaved edits are not restored after navigating away.
+- **Sources:** one connection per public Google Sheets range. Cards show health, last successful read, refresh interval and field references. Add/Edit opens a tested connection form with a read-only data preview. Local test values are tucked under a disclosure.
+- **Mappings:** select a stage and graphic, then map any ordinary text field. Choose a connection and either a **fixed cell** or a **row key**. For example, use header row `1`, key column `Stage`, row key `STAGE 1`, and value column `Round`. Rearranging the stage rows does not change which stage is selected. Duplicate headers, duplicate keys, missing rows and empty/oversized values retain the last valid field value and show a warning.
 
-Field mappings belong to Data Manager. Remapping a field changes its editor binding; an active program keeps its previous source until the next Play/Update. Manual text, editor link mode and committed program bindings are separate. Each saved graphic has an edit revision: stale controller writes receive a conflict instead of overwriting newer edits. Reload the rundown to resolve a conflict. The Data Manager similarly rejects a stale document revision; its Reload button discards unsaved manager edits.
+Choose **This graphic** for a specific item or **Template default for this stage** to reuse a mapping in other copies of that template on the same stage. **Use template default** removes the graphic override. An explicit Unassigned override keeps that field manual-only even when a default exists. A default does not automatically enable linked mode: each rundown field still has its own chain button. Existing explicit mappings take precedence over new defaults.
 
-The server creates `.local/ycs-data.json` on first use (override with `ycs.dataFile`). This ignored JSON file is the source document, with version, revision, sources and mappings. The server checks it once per second, so it can also be edited locally. Keep the schema intact and increment `revision` when editing externally. Prefer replacing the complete file atomically. API writes validate nonempty source text up to 300 characters and use atomic replacement.
+Mapping edits save together with an expected document revision. Background polling never replaces an unsaved mapping form or silently advances its revision. If another operator saves first, reload the saved mappings and reapply your edits. A connection editor similarly rejects stale saves.
 
-If the file becomes missing or invalid, existing links retain their last valid values and the chain/manager show a warning. Restoring valid JSON resumes updates. Last-good data is cached in memory; if the server starts with no valid source, the saved manual field supplies the fallback. Source failures do not disable manual playback. No template polls the source: the server resolves standard SPX field values and pushes composition snapshots. The previous standalone linking pilot and its port 8787 are not used by this fork.
+In the rundown, ordinary content fields have visible labels and a chain button. Hidden broadcast identity stays hidden. Ticker speed, timing, artwork and advanced JSON overrides are grouped under **Appearance & timing**. **Manage field mappings** opens Data Manager with this stage and graphic already selected.
 
-## Public Google Sheets
+1. Type a manual value or click a field's chain to use its assigned data. A linked field is read-only; clicking again restores its saved manual text.
+2. Inspect **Preview**. Typing or toggling links does not change program.
+3. **Save draft** persists field values and link modes without changing program. A pending badge identifies differences from an active graphic.
+4. **Play** or **Update on air** commits the draft and its current field mappings. Later successful source reads update committed linked fields automatically, preserving the ticker iframe and crawl animation.
 
-The connector uses Google's documented [public spreadsheet query endpoint](https://developers.google.com/chart/interactive/docs/spreadsheets). A sheet shared as **Anyone with the link → Viewer** can be read without Google sign-in, an API key or a service account. The connector reads the sheet on the SPX server. It never changes the sheet's sharing settings or writes back to it.
+A mapping change does not rebind an active graphic until Update/Play. Its previous committed selector keeps receiving live data in the meantime. Renaming a connection or changing its interval is allowed while used. Changing its sheet, tab or range is blocked while saved/default/on-air references exist: create a new connection and remap the fields instead. Remove is disabled until saved/default references are unassigned and on-air linked graphics are stopped. No connection deletion writes to Google Sheets.
 
-1. In Data Manager, enter a **Source name** and the original `https://docs.google.com/spreadsheets/d/.../edit` sharing URL. A `gid` in the URL selects that tab automatically.
-2. Optionally enter a worksheet name or numeric gid to choose another tab. Enter a bounded preview range, such as `A1:D4`, and an interval of **5–3600 seconds**.
-3. Click **Test connection**. This reads a preview only, without saving a source or changing program. Select the nonempty cell to expose as this source's value, then click **Add source**. Changing connection settings invalidates the previous test/selection.
-4. Assign the new source under **Field mappings**. In the stage rundown, click the Current round chain and inspect preview. **Save** persists the draft mode; **Play/Update** commits it to program.
-5. Edit the source cell in Google Sheets. Committed linked fields follow successful reads automatically. The crawler keeps its iframe and continues moving. Pending manual overrides stay separate until Update.
+General text fields are supported, including the ticker's round, status, day/date, location and rounds-remaining text, and lower-third name/title. Checkboxes, numbers, artwork pickers and JSON fields remain manually controlled. Typed linking, transforms, private Sheets and general HTTP API adapters are future extensions.
 
-Each Google Sheets source exposes one selected cell. To expose another cell, add another named source. Preview ranges are limited to 20 rows by 12 columns. Cell values use formatted text where available, including calculated sheet values, and must be nonempty and at most 300 characters. Empty/invalid values are treated as a failed read rather than clearing the graphic. No arbitrary JSON paths, transformations or automatic type conversion into other template field types are included in this milestone.
+## Public Google Sheets runtime
 
-Saved source cards show the current value, selected cell, interval, connection status, last successful read and retry time after failure. **Refresh now** reads immediately. Google may cache results, so the interval is not a guarantee of frame-accurate or instantaneous updates. Last success is a successful read time, not the cell's modification time. Live values/status refresh without replacing unsaved local inputs or mappings.
+The connector uses Google's documented [public spreadsheet query endpoint](https://developers.google.com/chart/interactive/docs/spreadsheets). Share the original sheet as **Anyone with the link → Viewer**; no Google sign-in, API key or service account is required. The server only reads it.
 
-Polling starts on the server even when no controller browser is open. At most four scheduled reads run together, repeated reads of the same source are coalesced, and failed reads use exponential backoff up to one hour. Requests have an eight-second timeout and a bounded response size. The rundown chain becomes amber for an unavailable/stale source, while retaining its last valid value. Recovery resumes the same link without Play or an animation restart.
+In Sources, add a connection name, the original `https://docs.google.com/spreadsheets/d/.../edit` sharing URL, an optional worksheet name/numeric gid and an A1 range. The URL's `gid` selects its tab when Worksheet is blank. Ranges are bounded to **200 rows × 32 columns**; the form previews the first ten rows/eight columns. Refresh intervals are **5–3600 seconds** under Refresh settings. Test before saving; editing the target invalidates the test. The save re-reads the range rather than trusting browser preview data.
 
-Last valid values are atomically cached in ignored `.local/ycs-data.sheets-cache.json` (derived from `ycs.dataFile`). After a server restart, the saved value is available while the next read is pending; **program still starts stopped**. Cache entries are bound to the exact source configuration so a changed cell cannot reuse another cell's value. A missing or damaged cache falls back to the saved manual field until a valid read succeeds. Background refreshes do not advance the saved configuration revision or write runtime values into the configuration document.
+One background read refreshes the connection's dataset for all mapped fields and stages. At most four scheduled reads run together; concurrent refresh requests for a connection are coalesced. Requests time out after eight seconds and failed reads back off up to one hour. Google may cache responses, so last read is not the cell's modification time and the interval does not guarantee instantaneous updates. Cell values use formatted text and must be nonempty and at most 300 characters.
 
-Original public sharing URLs are supported. Publish-to-web `/d/e/...` URLs, private/restricted sheets and general HTTP/CSV sources are not supported. Outbound requests are constructed for `https://docs.google.com` only and do not follow redirects or send cookies. Google callback responses are parsed as JSON; remote scripts and cell contents are never evaluated. No new dependency is required.
+The server loads saved configuration and starts polling without a Data Manager or rundown browser open. `.local/ycs-data.json` (or `ycs.dataFile`) stores version 2 connections, local/legacy sources, stage/graphic mappings and stage/template defaults. Atomic saves advance `revision`; manual external edits must also advance it. Missing/invalid JSON retains the last valid configuration and blocks further saves until repaired.
 
-Additional server routes (same origin/API access rules as stage commands):
+Version 1 cell sources migrate automatically: identical connection settings are combined, original source IDs and cell selections are preserved, and an exact `.v1-backup.json` is written before migration. Existing mapped cells become direct field selections. Unused original cell aliases remain in the saved document for compatibility; select their connection and cell to reuse them from the new UI.
 
-- `POST /api/ycs/data/sheets/test`: `{settings:{url,worksheet,range,refreshSeconds}}` → preview cells.
-- `POST /api/ycs/data/sheets`: `{label,settings:{url,worksheet,range,refreshSeconds,cell},revision}` → saved source ID and snapshot; the selected cell is re-read before saving.
-- `POST /api/ycs/data/sheets/:id/refresh`: refresh a saved source and return status/last valid value.
+Last good datasets and resolved field values are cached atomically beside the data file as `.sheets-cache.json`. Cache identity includes the connection target and selection, preventing cross-cell reuse. A missing/damaged cache falls back to each field's saved manual text until a successful read. Program always starts stopped after a server restart. Runtime updates do not advance the configuration revision or store transient live values in the configuration document. These ignored local files, backups and real sheet URLs are never committed.
+
+Publish-to-web `/d/e/...` URLs, restricted sheets and arbitrary HTTP/CSV endpoints are not accepted. Requests go only to `https://docs.google.com`, without cookies or redirects. Callback payloads are parsed as JSON, never evaluated as JavaScript. No dependency was added.
+
+Additional API routes use the same origin/auth rules as stage commands:
+
+- `GET /api/ycs/data`: configuration, connection health, datasets, usages and resolved source values.
+- `POST /api/ycs/data/sheets/test`: `{settings:{url,worksheet,range,refreshSeconds}}` → read-only preview.
+- `POST /api/ycs/data/connections`: `{id?,label,settings,revision}` → saved connection and snapshot.
+- `POST /api/ycs/data/connections/:id/refresh`: immediate refresh.
+- `POST /api/ycs/data/connections/:id/remove`: `{revision}` → remove an unused connection.
+- `GET /api/ycs/data/mappings/:stage/:graphic`: field definitions and effective/default bindings.
+- `POST /api/ycs/data/mappings/:stage/:graphic`: `{revision,edits:[{field,scope,binding}]}` → atomic mapping save. Scope is `override`, `default`, or `inherit`; binding is null, `{source:id}`, or `{connection:id,selection:{kind:'cell',cell:'B2'}}` / `{connection:id,selection:{kind:'row',headerRow:1,keyColumn:'Stage',keyValue:'STAGE 1',valueColumn:'Round'}}`.
+
+The earlier `/data/source`, `/data/mapping`, `/data/sheets` and `/data/sheets/:id/refresh` endpoints remain available for existing integrations. New clients should use connection and mapping APIs rather than create one source per cell.
+
+## Background runtime on Windows
+
+After initial `npm ci` and demo/configuration setup, run from this checkout:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ycs/start-runtime.ps1
+# Or select an existing show configuration:
+powershell -NoProfile -ExecutionPolicy Bypass -File ycs/start-runtime.ps1 -Config .local/my-show.json
+powershell -NoProfile -ExecutionPolicy Bypass -File ycs/stop-runtime.ps1
+```
+
+The launcher defaults to the existing `.local/ycs-dev.json`, launches Node hidden, loads saved connections/rundowns without regenerating demo content, and checks readiness. Starting the same recorded configuration again reuses its healthy process. A per-port startup mutex prevents duplicate launches; an unrelated occupied port is rejected. Stop verifies the recorded executable and process start time before stopping anything. Logs and process identity are saved under ignored `.local/runtime-logs/` and `.local/runtime-process.json`. `-NodePath` supports an absolute Node executable. Store configuration files inside this checkout because upstream SPX resolves their paths relative to server.js. Readiness requests use the saved API token when configured, without logging it. `general.launchBrowser` must be false.
+
+This is a background process for the current Windows session, not an installed Windows service. An explicit launcher command can later be registered with Task Scheduler for login startup; no Windows login settings are changed by these scripts. Restart behavior, account credentials and LAN exposure should be validated on the actual host before venue use.
 
 ## Program, preview and renderer status
 
@@ -108,7 +130,7 @@ Renderer subscriptions use the existing Socket.IO server's `/ycs-playback` names
 
 Save pending edits before reloading existing rundown/output pages after updating to the WebSocket version. Legacy EventSource subscriptions (`Accept: text/event-stream`) receive HTTP 204 to stop reconnecting and free their HTTP slots; the old page's unsaved fields are not altered. Raw requests without that Accept header can still read the legacy event endpoint. A reverse proxy used in a future deployment must support WebSocket upgrades.
 
-The initial development configuration is loopback-only. Remote API requests require a configured `ycs.apiKey` (Bearer header) or an authenticated SPX operator session. LAN deployment, unattended renderer authentication, startup/service installation, and testing on the actual vMix machines need a separate validation pass before venue use.
+The initial development configuration is loopback-only. Remote API requests require a configured `ycs.apiKey` (Bearer header) or an authenticated SPX operator session. LAN deployment, unattended renderer authentication, Windows service/login startup installation, and testing on the actual vMix machines need a separate validation pass before venue use.
 
 ## Verification and remaining work
 
@@ -116,6 +138,6 @@ Run `npm test` for stage isolation, concurrent slots, replacement, preview safet
 
 The browser smoke test covers two native controllers, a ticker and lower third together, independent Stage 2 playout, and the program renderer. Companion integration is tested through its intended HTTP requests; a physical Stream Deck is not required. The Companion application/emulator itself has not yet been configured in this fork's first milestone.
 
-The native data-link test supports one text field, local JSON and public Google Sheets. General field/type selection, editing/removing saved sheet connections, private Google authentication, HTTP API adapters, operator-specific preview sessions and final production deployment remain subsequent work. Companion's application/emulator is still not configured. No source credentials or user spreadsheet IDs are included in this repository.
+The data-link workflow supports ordinary text fields, reusable public Sheets datasets, cell/row selections, defaults and connection editing/removal. Typed fields/transforms, private Google authentication, HTTP API adapters, operator-specific preview sessions and final production deployment remain subsequent work. Companion's application/emulator is still not configured. No source credentials or user spreadsheet IDs are included in this repository.
 
 Upstream changes are intentionally limited: registration of the optional module, shared session middleware for the stage WebSocket namespace, an optional listener host, stage attributes/script/preview URL in the existing controller view, test scripts, and local-file ignore rules. Keep changes to upstream files small so upstream fixes can be merged.

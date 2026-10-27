@@ -12,6 +12,7 @@ module.exports = function registerYCS(app, config, hooks = {}) {
   const sources = new DataSources(settings.dataFile || path.resolve(config.general.dataroot, '../ycs-data.json'), settings.stages, { sheets: hooks.sheets });
   const playback = new Playback(repository, settings.slots, sources);
   const renderers = new Renderers();
+  sources.activeReferences = () => [...playback.states].flatMap(([stage, state]) => state.program.flatMap(graphic => Object.entries(graphic.links || {}).filter(([, link]) => link.mode === 'linked').map(([field, link]) => ({ stage, graphic: graphic.id, field, source: link.source }))));
   let closeSockets;
   playback.attachSockets = io => { closeSockets = require('./sockets.cjs')(io, playback, config); };
   const updateLinks = () => {
@@ -60,8 +61,21 @@ module.exports = function registerYCS(app, config, hooks = {}) {
   router.post('/data/mapping', handlers(async (req, res) => {
     const { stage, graphic, field, source, revision } = req.body;
     const item = repository.item(await repository.read(stage), graphic);
-    if (!linkable(item, field)) return res.status(422).json({ error: 'The first data-link test supports the ticker Current round field (f5)' });
+    if (!linkable(item, field)) return res.status(422).json({ error: 'This template field does not support text linking' });
     res.json(await sources.updateMapping({ stage, graphic, field, source }, revision));
+  }));
+  router.post('/data/connections', handlers(async (req, res) => res.json(await sources.saveConnection(req.body.id, req.body.label, req.body.settings, req.body.revision))));
+  router.post('/data/connections/:id/refresh', handlers(async (req, res) => res.json(await sources.refreshSheet(req.params.id))));
+  router.post('/data/connections/:id/remove', handlers(async (req, res) => res.json(await sources.removeConnection(req.params.id, req.body.revision))));
+  router.get('/data/mappings/:stage/:graphic', handlers(async (req, res) => {
+    await sources.ready;
+    const { stage, graphic } = req.params, item = repository.item(await repository.read(stage), graphic);
+    res.json({ revision: sources.snapshot().revision, template: item.relpath, fields: item.DataFields.filter(field => linkable(item, field.field)).map(field => ({ field: field.field, title: field.title || field.field, ...sources.effective(stage, graphic, field.field, item.relpath), source: sources.mapping(stage, graphic, field.field, item.relpath) || null })) });
+  }));
+  router.post('/data/mappings/:stage/:graphic', handlers(async (req, res) => {
+    const { stage, graphic } = req.params, item = repository.item(await repository.read(stage), graphic);
+    if (!Array.isArray(req.body.edits) || req.body.edits.some(edit => !linkable(item, edit.field))) return res.status(422).json({ error: 'Only text fields can be mapped' });
+    res.json(await sources.saveMappings(stage, graphic, item.relpath, req.body.edits, req.body.revision));
   }));
   router.get('/stages', (req, res) => res.json([...repository.stages.values()].map(({ id, title, project, rundown }) => ({ id, title, controller: `/gc/${project}/${rundown}` }))));
   router.get('/stages/:stage/graphics', handlers(async (req, res) => res.json(await playback.catalog(req.params.stage))));

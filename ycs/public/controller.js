@@ -4,12 +4,11 @@ const stage = document.documentElement.dataset.ycsStage;
 if (stage) {
   const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '/ycs/controller.css'; document.head.append(css);
   const panel = document.createElement('section'); panel.className = 'ycs-stage-panel';
-  panel.innerHTML = `<strong class="ycs-heading"></strong><nav class="ycs-stage-links" aria-label="Stages"></nav>
-    <div class="ycs-program" role="status">Reading program state…</div><div class="ycs-preview">Reading preview state…</div>
-    <div class="ycs-health">Checking output connections…</div>
-    <div class="ycs-actions"><button type="button" data-monitor="preview" aria-pressed="true">Preview monitor</button><button type="button" data-monitor="program" aria-pressed="false">Program monitor</button></div>
-    <a class="ycs-manager-link" href="/ycs/data-manager">Data Manager</a>
-    <button type="button" class="ycs-clear">STOP THIS STAGE</button><div class="ycs-command-status" role="status"></div>`;
+  panel.innerHTML = `<div class="ycs-panel-heading"><strong class="ycs-heading"></strong><nav class="ycs-stage-links" aria-label="Stages"></nav></div>
+    <div class="ycs-program" role="status">Reading program state…</div>
+    <div class="ycs-actions"><button type="button" data-monitor="preview" aria-pressed="true">Preview</button><button type="button" data-monitor="program" aria-pressed="false">Program</button><a class="ycs-manager-link" href="/ycs/data-manager">Data Manager ↗</a></div>
+    <details class="ycs-output-details"><summary>Output connections</summary><div class="ycs-preview">Reading preview state…</div><div class="ycs-health">Checking connections…</div></details>
+    <button type="button" class="ycs-clear">Stop stage</button><div class="ycs-command-status" role="status"></div>`;
   panel.querySelector('.ycs-heading').textContent = stage.toUpperCase().replace('-', ' ');
   document.getElementById('controllerPluginButtons')?.prepend(panel);
   const message = panel.querySelector('.ycs-command-status');
@@ -25,54 +24,84 @@ if (stage) {
   function fields(row) {
     return [...row.querySelectorAll('[data-update]')].map(input => ({ field: input.dataset.update, value: input.type === 'checkbox' ? (input.checked ? '1' : '0') : input.value }));
   }
+  function pending(row, model) {
+    if (!model.badge) return;
+    let changed = row.dataset.spxChanged === 'true';
+    const current = program.get(row.dataset.spxEpoch);
+    if (current) for (const [field, link] of Object.entries(model.links)) {
+      if (link.mode === 'linked' ? current.links?.[field]?.source !== link.source || current.links?.[field]?.mode !== link.mode : current.data?.[field] !== link.manual) changed = true;
+    }
+    model.badge.hidden = !changed; model.badge.textContent = current ? 'Pending · Update on air to apply' : 'Unsaved draft';
+  }
   function paintLink(row, model) {
-    const link = model.links?.f5, input = row.querySelector('[data-update="f5"]');
-    if (!link || !input) return;
-    const mapping = sourceState?.mappings.find(item => item.stage === stage && item.graphic === row.dataset.spxEpoch && item.field === 'f5');
-    link.source = mapping?.source || null;
-    const source = sourceState?.sources[link.source], linked = link.mode === 'linked';
-    if (source?.value !== undefined) link.lastValue = source.value;
-    const value = source?.value ?? link.lastValue ?? link.manual, changed = linked && input.value !== value;
-    if (linked) input.value = value;
-    input.readOnly = linked; input.classList.toggle('ycs-linked-input', linked);
-    model.button.setAttribute('aria-pressed', String(linked));
-    model.button.setAttribute('aria-label', linked ? 'Use manual Current round' : 'Link Current round to data source');
-    model.button.title = linked ? 'Linked — click to restore manual text' : 'Manual — click to link';
-    model.button.classList.toggle('is-linked', linked);
-    const sourceProblem = !source || sourceState?.health !== 'ok' || (source.health && source.health !== 'ok') || source.warning;
-    model.button.classList.toggle('is-warning', linked && Boolean(sourceProblem));
-    const onAir = program.get(row.dataset.spxEpoch)?.links?.f5;
-    const committed = onAir?.mode === 'linked' && onAir.source === link.source;
-    model.detail.textContent = linked
-      ? `${source?.label || 'Source unavailable'}${sourceProblem ? ' · source unavailable/stale; retaining last valid value' : ''} · ${committed ? 'linked on program' : 'pending until Update / Play'}`
-      : `Manual${source ? ' · mapped to ' + source.label : ' · assign a source in Data Manager'}`;
-    if (changed && row.classList.contains('inFocus')) schedulePreview(row);
+    for (const [field, widget] of Object.entries(model.widgets || {})) {
+      const link = model.links[field], { input, button, detail, title } = widget;
+      const override = sourceState?.mappings.find(item => item.stage === stage && item.graphic === row.dataset.spxEpoch && item.field === field);
+      const fallback = sourceState?.defaults?.find(item => item.stage === stage && item.template === model.template && item.field === field);
+      if (sourceState) {
+        const nextSource = (override || fallback)?.source || null;
+        if (link.source !== nextSource) delete link.lastValue;
+        link.source = nextSource;
+      }
+      const source = sourceState?.sources[link.source], linked = link.mode === 'linked';
+      if (source?.value !== undefined) link.lastValue = source.value;
+      const value = source?.value ?? link.lastValue ?? link.manual, changed = linked && input.value !== value;
+      if (linked) input.value = value;
+      input.readOnly = linked; input.classList.toggle('ycs-linked-input', linked);
+      button.setAttribute('aria-pressed', String(linked)); button.setAttribute('aria-label', linked ? 'Use manual ' + title : 'Link ' + title + ' to data source');
+      button.title = linked ? 'Linked — click to restore manual text' : 'Manual — click to link'; button.classList.toggle('is-linked', linked);
+      const problem = !source || sourceState?.health !== 'ok' || (source.health && source.health !== 'ok') || source.warning;
+      button.classList.toggle('is-warning', linked && Boolean(problem));
+      detail.textContent = linked ? `${source?.label || 'Source unavailable'}${problem ? ' · holding last valid value / manual fallback' : ''}` : link.source ? 'Manual override · ' + source.label : 'Manual · source unassigned';
+      if (changed && row.classList.contains('inFocus')) schedulePreview(row);
+    }
+    pending(row, model);
+  }
+  function organize(row, editor, model) {
+    const cell = row.querySelector('#Expanded td[width="65%"]');
+    const supported = ['hidden', 'textfield', 'checkbox', 'number', 'filelist', 'textarea', 'dropdown', 'caption', 'instruction', 'spacer'];
+    if (!cell || !editor.fields?.length || editor.fields.some(field => !supported.includes(field.ftype))) return;
+    const original = document.createElement('div'); original.hidden = true; original.className = 'ycs-original-fields';
+    while (cell.firstChild) original.append(cell.firstChild); cell.append(original);
+    const content = document.createElement('div'); content.className = 'ycs-editor-content';
+    const advanced = document.createElement('details'); advanced.className = 'ycs-advanced'; advanced.innerHTML = '<summary>Appearance & timing</summary>';
+    const badge = document.createElement('span'); badge.className = 'ycs-pending'; badge.hidden = true; model.badge = badge;
+    const manager = document.createElement('a'); manager.href = `/ycs/data-manager?stage=${stage}&graphic=${encodeURIComponent(row.dataset.spxEpoch)}`; manager.className = 'ycs-field-mappings'; manager.textContent = 'Manage field mappings ↗';
+    cell.append(content, advanced, manager, badge);
+    for (const field of editor.fields) {
+      const input = original.querySelector(`[data-update="${field.field}"]`); if (!input || field.ftype === 'hidden') continue;
+      const wrapper = document.createElement('div'); wrapper.className = 'ycs-editor-field';
+      const label = document.createElement('label'); input.id ||= `ycs-${row.dataset.spxEpoch}-${field.field}`; label.htmlFor = input.id; label.textContent = field.title || field.field;
+      if (field.ftype === 'checkbox') { input.classList.add('ycs-check'); wrapper.append(input, label); }
+      else wrapper.append(label, input);
+      (['number', 'filelist', 'textarea'].includes(field.ftype) ? advanced : content).append(wrapper);
+    }
+    if (advanced.children.length === 1) advanced.hidden = true;
+    for (const info of row.querySelectorAll('#Expanded td.aright.spxTableHeadsmall')) info.closest('tr').hidden = true;
+    const save = row.querySelector('button[onclick*="saveTemplateItemChangesByElement"]'); if (save) { save.textContent = 'Save draft'; save.title = 'Save without changing program'; }
+    const update = row.querySelector('[data-spx-name="updatebutton"]'); if (update) { update.textContent = 'Update on air'; update.title = 'Apply this draft and its field links to program'; }
   }
   function initialize(row) {
-    const id = row.dataset.spxEpoch, model = { links: {}, revision: 0, queue: Promise.resolve() };
-    models.set(id, model);
+    const id = row.dataset.spxEpoch, model = { links: {}, widgets: {}, revision: 0, queue: Promise.resolve() }; models.set(id, model);
     model.ready = request(`/api/ycs/stages/${stage}/graphics/${encodeURIComponent(id)}/editor`).then(editor => {
-      model.links = editor.links; model.revision = editor.revision;
-      const input = row.querySelector('[data-update="f5"]');
-      if (editor.links.f5 && input) {
+      model.links = editor.links; model.revision = editor.revision; model.template = editor.template; organize(row, editor, model);
+      for (const [field, link] of Object.entries(model.links)) {
+        const input = row.querySelector(`[data-update="${field}"]`); if (!input) continue;
+        const title = editor.fields?.find(item => item.field === field)?.title || input.placeholder || 'Current round';
         const container = document.createElement('div'); container.className = 'ycs-link-field'; input.before(container);
         const button = document.createElement('button'); button.type = 'button'; button.className = 'ycs-link-toggle';
         button.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 .1l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7-.1l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
         const detail = document.createElement('div'); detail.className = 'ycs-link-detail'; container.append(button, input); container.after(detail);
-        model.button = button; model.detail = detail;
+        model.widgets[field] = { input, button, detail, title };
         button.addEventListener('click', event => {
           event.stopPropagation();
-          const link = model.links.f5;
-          if (link.mode === 'manual') {
-            if (!link.source) { notify('Assign a source in Data Manager first.', true); return; }
-            link.manual = input.value; link.mode = 'linked';
-          } else { link.mode = 'manual'; input.value = link.manual; }
+          if (link.mode === 'manual') { if (!link.source) { notify('Assign a source using Manage field mappings first.', true); return; } link.manual = input.value; link.mode = 'linked'; }
+          else { link.mode = 'manual'; input.value = link.manual; }
           row.dataset.spxChanged = 'true'; paintLink(row, model); send(row, 'preview');
-        });
-        input.value = editor.links.f5.manual; paintLink(row, model);
+        }); input.value = link.manual;
       }
-    }).catch(error => { notify(error.message, true); throw error; });
-    model.ready.catch(() => {});
+      paintLink(row, model);
+    }).catch(error => { notify(error.message, true); throw error; }); model.ready.catch(() => {});
   }
   function send(row, action) {
     if (!row) return Promise.resolve();
@@ -87,7 +116,7 @@ if (stage) {
       if (action !== 'preview') {
         if (['play', 'update', 'save'].includes(action)) model.revision = result.editorRevision;
         notify(action === 'save' ? 'Saved. Program unchanged.' : `${row.dataset.spxEpoch}: ${action}`);
-        if (['play', 'update', 'save'].includes(action)) row.dataset.spxChanged = 'false';
+        if (['play', 'update', 'save'].includes(action)) { row.dataset.spxChanged = 'false'; pending(row, model); }
         if (action === 'save') {
           const summary = row.querySelector('.truncate');
           if (summary) summary.textContent = [...row.querySelectorAll('[data-update]')].filter(input => input.type !== 'hidden').slice(0, 2).map(input => input.type === 'checkbox' ? (input.checked ? '1' : '0') : input.value).join(' | ');
@@ -104,7 +133,9 @@ if (stage) {
   document.addEventListener('input', event => {
     const row = event.target.closest('.itemrow'); if (!row || !event.target.matches('[data-update]')) return;
     const model = models.get(row.dataset.spxEpoch);
-    if (event.target.dataset.update === 'f5' && model?.links.f5?.mode === 'manual') model.links.f5.manual = event.target.value;
+    const link = model?.links[event.target.dataset.update];
+    if (link?.mode === 'manual') link.manual = event.target.value;
+    row.dataset.spxChanged = 'true'; if (model) pending(row, model);
     schedulePreview(row);
   });
   // Existing buttons and keyboard shortcuts call these globals. Server state
@@ -149,7 +180,7 @@ if (stage) {
       }
     }
     const selected = document.querySelector('.itemrow.inFocus'); if (selected) window.setMasterButtonStates?.(selected);
-    panel.querySelector('.ycs-program').textContent = snapshot.graphics.length ? 'PROGRAM · ' + snapshot.graphics.map(item => item.id).join(', ') : 'PROGRAM · Stopped';
+    panel.querySelector('.ycs-program').textContent = snapshot.graphics.length ? 'PROGRAM · ' + snapshot.graphics.length + ' active · ' + snapshot.graphics.map(item => item.slot).join(', ') : 'PROGRAM · Stopped';
   }
   const stageEvents = io('/ycs-playback', { transports: ['websocket'], forceNew: true });
   stageEvents.on('connect', () => stageEvents.emit('subscribe', { stage, modes: ['program', 'preview'] }));
@@ -170,13 +201,16 @@ if (stage) {
     if (polling || disposed) return; polling = true;
     try {
       const [data, health] = await Promise.all([request('/api/ycs/data'), request(`/api/ycs/stages/${stage}/health`)]); sourceState = data;
-      for (const row of document.querySelectorAll('.itemrow')) { const model = models.get(row.dataset.spxEpoch); if (model?.button) paintLink(row, model); }
+      for (const row of document.querySelectorAll('.itemrow')) { const model = models.get(row.dataset.spxEpoch); if (model?.widgets) paintLink(row, model); }
       const lines = ['program', 'preview'].map(mode => {
         const state = health[mode];
         return `${mode}: ${state.errors.length ? state.errors.join('; ') : !state.connected ? 'no renderer connected' : state.ready ? `${state.ready} renderer(s) ready` : 'loading current state'}`;
       });
       const target = panel.querySelector('.ycs-health'); target.textContent = lines.join(' · ');
-      target.classList.toggle('ycs-error', !eventsConnected || health.program.errors.length > 0 || (active.size > 0 && !health.program.connected));
+      const problem = !eventsConnected || health.program.errors.length > 0 || (active.size > 0 && !health.program.connected);
+      target.classList.toggle('ycs-error', problem);
+      panel.querySelector('.ycs-output-details summary').textContent = problem ? 'Output connections · Needs attention' : 'Output connections';
+      panel.querySelector('.ycs-output-details summary').classList.toggle('ycs-error', problem);
     } catch { panel.querySelector('.ycs-health').textContent = 'Output/data status unavailable — reconnecting'; }
     finally { polling = false; }
   }
