@@ -20,10 +20,9 @@ async function renderer(t) {
   window.console.error = () => {};
   window.crypto.randomUUID = randomUUID;
   window.fetch = async (url, request) => { reports.push(JSON.parse(request.body)); return { ok: true }; };
-  window.EventSource = class {
-    constructor() { events = this; }
-    addEventListener(event, callback) { this.receive = callback; }
-    close() {}
+  window.io = () => {
+    events = { on: (event, callback) => { events[event] = callback; }, emit() {}, disconnect() {} };
+    return events;
   };
   const root = window.document.getElementById('composition');
   const append = root.append.bind(root);
@@ -37,7 +36,7 @@ async function renderer(t) {
   };
   window.eval(await fs.readFile(path.join(__dirname, '../public/output.js'), 'utf8'));
   t.after(() => { window.dispatchEvent(new window.Event('pagehide')); window.close(); });
-  const send = (revision, graphics) => events.receive({ data: JSON.stringify({ stage: 'stage-1', mode: 'program', revision, graphics }) });
+  const send = (revision, graphics) => events.state({ stage: 'stage-1', mode: 'program', revision, graphics });
   const graphic = (id, slot = id, text = 'ROUND 11') => ({ id, slot, z: 10, exitMs: 1, template: '/templates/test.html', data: { f5: text } });
   return { window, root, calls, reports, events: () => events, send, graphic, fail: () => { failed = true; }, recover: () => { failed = false; } };
 }
@@ -75,7 +74,18 @@ test('failed replacements retain the old graphic, report errors and accept a rec
   assert.equal(r.root.querySelector('[data-graphic="ticker"]'), null);
   assert.equal(r.root.querySelectorAll('iframe').length, 1);
   assert.equal(r.reports.at(-1).state, 'ready');
-  r.events().onerror();
+  r.events()['connect_error']();
   await eventually(() => r.reports.at(-1)?.state === 'error');
   assert.match(r.reports.at(-1).message, /connection lost/i);
+});
+
+test('navigating an output closes health cleanly even when the browser transport has already closed', async t => {
+  const r = await renderer(t);
+  r.send(1, [r.graphic('ticker')]); await eventually(() => r.root.dataset.revision === '1');
+  r.events().disconnect = () => { throw new Error('Transport not open'); };
+  r.window.dispatchEvent(new r.window.Event('pagehide'));
+  assert.equal(r.reports.at(-1).state, 'closed');
+  assert.equal(r.root.querySelectorAll('iframe').length, 0);
+  r.events()['connect_error']();
+  assert.equal(r.reports.at(-1).state, 'closed', 'a disposed output must not re-register as an error renderer');
 });

@@ -111,21 +111,24 @@ async function drain() {
   }
   running = false;
 }
-const events = new EventSource(`/api/ycs/stages/${stage}/${mode}/events`);
-events.addEventListener('state', event => {
-  const snapshot = JSON.parse(event.data);
+const events = io('/ycs-playback', { transports: ['websocket'], forceNew: true });
+events.on('connect', () => events.emit('subscribe', { stage, modes: [mode] }));
+events.on('state', snapshot => {
   if (snapshot.stage !== stage || snapshot.mode !== mode || snapshot.revision < revision) return;
   revision = snapshot.revision;
   pending = snapshot;
   document.documentElement.dataset.connection = 'connected';
   drain();
 });
-events.onerror = () => { document.documentElement.dataset.connection = 'reconnecting'; renderingError = 'Output connection lost; retaining current graphics'; report(); };
+function disconnected() { if (disposed) return; document.documentElement.dataset.connection = 'reconnecting'; renderingError = 'Output connection lost; retaining current graphics'; report(); }
+events.on('disconnect', disconnected);
+events.on('connect_error', disconnected);
+events.on('stage-error', error => { renderingError = error.error; report(); });
 const healthTimer = setInterval(() => report(), 5000);
 window.addEventListener('pagehide', () => {
   disposed = true;
   clearInterval(healthTimer);
   report('closed', true);
-  events.close();
+  try { events.disconnect(); } catch { /* The browser may close the transport before pagehide. */ }
   for (const entry of [...frames.values(), ...retired]) entry.frame.remove();
 }, { once: true });

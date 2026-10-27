@@ -31,7 +31,7 @@ if (stage) {
     const mapping = sourceState?.mappings.find(item => item.stage === stage && item.graphic === row.dataset.spxEpoch && item.field === 'f5');
     link.source = mapping?.source || null;
     const source = sourceState?.sources[link.source], linked = link.mode === 'linked';
-    if (source) link.lastValue = source.value;
+    if (source?.value !== undefined) link.lastValue = source.value;
     const value = source?.value ?? link.lastValue ?? link.manual, changed = linked && input.value !== value;
     if (linked) input.value = value;
     input.readOnly = linked; input.classList.toggle('ycs-linked-input', linked);
@@ -39,11 +39,12 @@ if (stage) {
     model.button.setAttribute('aria-label', linked ? 'Use manual Current round' : 'Link Current round to data source');
     model.button.title = linked ? 'Linked — click to restore manual text' : 'Manual — click to link';
     model.button.classList.toggle('is-linked', linked);
-    model.button.classList.toggle('is-warning', linked && (!source || sourceState?.health !== 'ok'));
+    const sourceProblem = !source || sourceState?.health !== 'ok' || (source.health && source.health !== 'ok') || source.warning;
+    model.button.classList.toggle('is-warning', linked && Boolean(sourceProblem));
     const onAir = program.get(row.dataset.spxEpoch)?.links?.f5;
     const committed = onAir?.mode === 'linked' && onAir.source === link.source;
     model.detail.textContent = linked
-      ? `${source?.label || 'Source unavailable'}${sourceState?.health !== 'ok' || !source ? ' · retaining last valid value' : ''} · ${committed ? 'linked on program' : 'pending until Update / Play'}`
+      ? `${source?.label || 'Source unavailable'}${sourceProblem ? ' · source unavailable/stale; retaining last valid value' : ''} · ${committed ? 'linked on program' : 'pending until Update / Play'}`
       : `Manual${source ? ' · mapped to ' + source.label : ' · assign a source in Data Manager'}`;
     if (changed && row.classList.contains('inFocus')) schedulePreview(row);
   }
@@ -150,14 +151,21 @@ if (stage) {
     const selected = document.querySelector('.itemrow.inFocus'); if (selected) window.setMasterButtonStates?.(selected);
     panel.querySelector('.ycs-program').textContent = snapshot.graphics.length ? 'PROGRAM · ' + snapshot.graphics.map(item => item.id).join(', ') : 'PROGRAM · Stopped';
   }
-  const programEvents = new EventSource(`/api/ycs/stages/${stage}/program/events`);
-  programEvents.addEventListener('state', event => { eventsConnected = true; syncButtons(JSON.parse(event.data)); });
-  programEvents.onerror = () => { eventsConnected = false; panel.querySelector('.ycs-program').textContent = 'PROGRAM · Connection lost — state unconfirmed'; };
-  const previewEvents = new EventSource(`/api/ycs/stages/${stage}/preview/events`);
-  previewEvents.addEventListener('state', event => {
-    const snapshot = JSON.parse(event.data); panel.querySelector('.ycs-preview').textContent = snapshot.selected ? `PREVIEW · ${snapshot.selected} draft` : 'PREVIEW · Follows program';
+  const stageEvents = io('/ycs-playback', { transports: ['websocket'], forceNew: true });
+  stageEvents.on('connect', () => stageEvents.emit('subscribe', { stage, modes: ['program', 'preview'] }));
+  stageEvents.on('state', snapshot => {
+    if (snapshot.stage !== stage) return;
+    eventsConnected = true;
+    if (snapshot.mode === 'program') syncButtons(snapshot);
+    else if (snapshot.mode === 'preview') panel.querySelector('.ycs-preview').textContent = snapshot.selected ? `PREVIEW · ${snapshot.selected} draft` : 'PREVIEW · Follows program';
   });
-  previewEvents.onerror = () => { panel.querySelector('.ycs-preview').textContent = 'PREVIEW · Reconnecting'; };
+  function disconnected() {
+    if (disposed) return;
+    eventsConnected = false; panel.querySelector('.ycs-program').textContent = 'PROGRAM · Connection lost — state unconfirmed';
+    panel.querySelector('.ycs-preview').textContent = 'PREVIEW · Reconnecting';
+  }
+  stageEvents.on('disconnect', disconnected); stageEvents.on('connect_error', disconnected);
+  stageEvents.on('stage-error', error => notify(error.error, true));
   async function poll() {
     if (polling || disposed) return; polling = true;
     try {
@@ -175,6 +183,7 @@ if (stage) {
   poll(); const pollTimer = setInterval(poll, 1500);
   const options = document.getElementById('renderOptionsFoldable'); if (options) options.hidden = true;
   window.addEventListener('pagehide', () => {
-    disposed = true; clearInterval(pollTimer); for (const timer of timers.values()) clearTimeout(timer); programEvents.close(); previewEvents.close();
+    disposed = true; clearInterval(pollTimer); for (const timer of timers.values()) clearTimeout(timer);
+    try { stageEvents.disconnect(); } catch { /* Transport may already be closed during navigation. */ }
   }, { once: true });
 }

@@ -9,17 +9,19 @@ module.exports = function registerYCS(app, config, hooks = {}) {
   if (!config.ycs?.enabled) return;
   const settings = config.ycs;
   const repository = new RundownRepository(config.general.dataroot, settings.stages);
-  const sources = new DataSources(settings.dataFile || path.resolve(config.general.dataroot, '../ycs-data.json'), settings.stages);
+  const sources = new DataSources(settings.dataFile || path.resolve(config.general.dataroot, '../ycs-data.json'), settings.stages, { sheets: hooks.sheets });
   const playback = new Playback(repository, settings.slots, sources);
   const renderers = new Renderers();
+  let closeSockets;
+  playback.attachSockets = io => { closeSockets = require('./sockets.cjs')(io, playback, config); };
   const updateLinks = () => {
     for (const stage of settings.stages) playback.refreshLinks(stage.id).catch(error => console.error('[YCS data]', error.message));
   };
   sources.on('change', updateLinks);
   sources.ready.catch(error => console.error('[YCS data]', error.message));
-  const sourceTimer = setInterval(() => sources.refresh().catch(error => console.error('[YCS data]', error.message)), 1000);
+  const sourceTimer = setInterval(() => sources.refresh().then(() => sources.pollSheets()).catch(error => console.error('[YCS data]', error.message)), 1000);
   sourceTimer.unref();
-  playback.close = () => { clearInterval(sourceTimer); sources.off('change', updateLinks); };
+  playback.close = () => { clearInterval(sourceTimer); sources.off('change', updateLinks); sources.close(); closeSockets?.(); };
   const auth = hooks.auth || require('../utils/spx_auth.js');
   const router = express.Router();
   const handlers = handler => (req, res, next) => Promise.resolve().then(() => handler(req, res)).catch(next);
@@ -52,6 +54,9 @@ module.exports = function registerYCS(app, config, hooks = {}) {
   router.use(sameOrigin, apiAccess);
   router.get('/data', handlers(async (req, res) => { await sources.ready; res.json(sources.snapshot()); }));
   router.post('/data/source', handlers(async (req, res) => res.json(await sources.updateSource(req.body.id, req.body.value, req.body.revision))));
+  router.post('/data/sheets/test', handlers(async (req, res) => res.json(await sources.testSheet(req.body.settings))));
+  router.post('/data/sheets', handlers(async (req, res) => res.json(await sources.addSheet(req.body.label, req.body.settings, req.body.revision))));
+  router.post('/data/sheets/:id/refresh', handlers(async (req, res) => res.json(await sources.refreshSheet(req.params.id))));
   router.post('/data/mapping', handlers(async (req, res) => {
     const { stage, graphic, field, source, revision } = req.body;
     const item = repository.item(await repository.read(stage), graphic);
@@ -72,6 +77,10 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     try {
       const { stage, mode } = req.params;
       const state = playback.snapshot(stage, mode);
+      // Retire legacy browser streams without retry loops. Updated controllers
+      // and outputs use the /ycs-playback Socket.IO namespace. Keep the stream
+      // endpoint for explicit non-browser integrations and existing API tests.
+      if (req.get('accept')?.includes('text/event-stream')) return res.sendStatus(204);
       res.status(200).set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
       res.flushHeaders();
       const send = value => res.write(`event: state\ndata: ${JSON.stringify(value)}\n\n`);

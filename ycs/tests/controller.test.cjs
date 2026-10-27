@@ -16,11 +16,7 @@ async function controller(t) {
   window.setMasterButtonStates = () => {};
   window.getFocusedRow = () => row;
   window.ToggleExpand = () => { closed++; row.querySelector('#Expanded').style.display = 'none'; };
-  window.EventSource = class {
-    constructor(url) { channels.set(url.includes('/program/') ? 'program' : 'preview', this); }
-    addEventListener(event, callback) { this.receive = callback; }
-    close() {}
-  };
+  window.io = () => ({ on: (event, callback) => channels.set(event, callback), emit() {}, disconnect() {} });
   window.fetch = async (url, request) => {
     let payload;
     if (request?.method === 'POST') {
@@ -36,7 +32,7 @@ async function controller(t) {
   window.eval(await fs.readFile(path.join(__dirname, '../public/controller.js'), 'utf8'));
   t.after(() => { window.dispatchEvent(new window.Event('pagehide')); window.close(); });
   for (let index = 0; index < 10; index++) await new Promise(resolve => setImmediate(resolve));
-  const program = graphics => channels.get('program').receive({ data: JSON.stringify({ graphics }) });
+  const program = graphics => channels.get('state')({ stage: 'stage-1', mode: 'program', graphics });
   return { window, row, posts, program, closed: () => closed };
 }
 
