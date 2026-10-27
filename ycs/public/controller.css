@@ -1,0 +1,13 @@
+.ycs-stage-panel{padding:12px;background:#26343f;color:#e2eaf0;font:13px/1.6 sans-serif}
+#controllerPluginButtons>:not(.ycs-stage-panel){display:none!important}
+.ycs-heading{font-size:14px}.ycs-stage-links{display:flex;gap:14px;margin:4px 0 8px}
+.ycs-stage-panel a{color:#f0cc55}.ycs-stage-links a[aria-current]{font-weight:bold}
+.ycs-health,.ycs-preview{color:#becbd5;font-size:12px}.ycs-error{color:#ffd180!important}
+.ycs-actions{display:flex;gap:6px;margin:10px 0 6px}.ycs-actions button{background:#15222c;border:1px solid #596c7d;color:#e2eaf0;padding:6px 9px;cursor:pointer}
+.ycs-actions button[aria-pressed=true]{border-color:#f0cc55;color:#f0cc55}
+.ycs-manager-link{display:inline-block;margin:3px 0 10px}.ycs-clear{display:block;width:100%;padding:7px;background:#a31930;color:white;border:0;cursor:pointer}
+.ycs-command-status{margin-top:5px;min-height:1em}.ycs-link-field{display:flex;align-items:stretch;gap:5px;width:100%}
+.ycs-link-field .gcinput{min-width:0;flex:1;width:auto!important}.ycs-link-toggle{flex:0 0 38px;border:1px solid #66717b;background:#26343f;color:#aebbc5;cursor:pointer;font:22px sans-serif}
+.ycs-link-toggle.is-linked{color:#66e675;border-color:#66e675}.ycs-link-toggle.is-warning{color:#ffd180;border-color:#ffd180}
+.ycs-link-toggle svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:middle}
+.ycs-linked-input{background:#48565f!important;color:#e5edf3!important}.ycs-link-detail{font:11px/1.5 sans-serif;color:#becbd5;margin:2px 0 8px 43px}

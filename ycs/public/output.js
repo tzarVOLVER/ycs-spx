@@ -7,6 +7,17 @@ let pending;
 let running = false;
 let disposed = false;
 let revision = -1;
+const rendererId = crypto.randomUUID();
+let renderedRevision = -1;
+let renderingError = '';
+async function report(state = renderingError ? 'error' : 'ready', keepalive = false) {
+  try {
+    await fetch(`/api/ycs/stages/${stage}/${mode}/report`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive,
+      body: JSON.stringify({ id: rendererId, state, revision: renderedRevision, message: renderingError.slice(0, 300) })
+    });
+  } catch { /* The controller marks missed heartbeats disconnected. */ }
+}
 document.documentElement.dataset.stage = stage;
 document.documentElement.dataset.mode = mode;
 
@@ -89,10 +100,12 @@ async function drain() {
   while (pending && !disposed) {
     const snapshot = pending;
     pending = null;
-    try { await reconcile(snapshot); }
+    try { await reconcile(snapshot); renderedRevision = snapshot.revision; renderingError = ''; await report(); }
     catch (error) {
       root.dataset.error = error.message;
       console.error('[YCS output]', error);
+      renderingError = error.message;
+      await report();
       // A failed template does not terminate this output's subscription.
     }
   }
@@ -107,9 +120,12 @@ events.addEventListener('state', event => {
   document.documentElement.dataset.connection = 'connected';
   drain();
 });
-events.onerror = () => { document.documentElement.dataset.connection = 'reconnecting'; };
+events.onerror = () => { document.documentElement.dataset.connection = 'reconnecting'; renderingError = 'Output connection lost; retaining current graphics'; report(); };
+const healthTimer = setInterval(() => report(), 5000);
 window.addEventListener('pagehide', () => {
   disposed = true;
+  clearInterval(healthTimer);
+  report('closed', true);
   events.close();
   for (const entry of [...frames.values(), ...retired]) entry.frame.remove();
 }, { once: true });

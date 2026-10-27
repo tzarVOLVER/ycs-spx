@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>YCS · Data Manager</title><link rel="stylesheet" href="/ycs/data-manager.css"><script type="module" src="/ycs/data-manager.js"></script></head>
+<body><header><div class="brand">SPX / YCS</div><h1>Data Manager <span>LOCAL TEST</span></h1><nav aria-label="Stage rundowns" id="stages"></nav></header>
+<main><p class="intro">Edit the local JSON test source and assign it to a stage’s Current round field. In the rundown, use the chain button to choose linked or manual text.</p>
+<div class="toolbar"><p id="health" role="status">Connecting…</p><button id="reload" type="button">Reload saved data</button></div>
+<p id="message" role="status"></p>
+<section><h2>Local sources</h2><p>Publishing changes an on-air field only if linked mode was already committed with Play or Update. Pending manual edits remain separate.</p><div id="sources"></div></section>
+<section><h2>Field mappings</h2><p>Mapping changes are pending for program until the next Play or Update. The current test supports the ticker’s Current round field.</p><div id="mappings"></div></section>
+<footer>Google Sheets and HTTP API adapters will use this same server-side linking path. They are not connected in this test.</footer></main></body></html>

@@ -4,6 +4,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
+const { linkable } = require('./data.cjs');
 
 const clone = value => structuredClone(value);
 const identifier = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$/;
@@ -57,19 +58,27 @@ function fieldValues(item, input) {
   for (const incoming of input) definitions.get(incoming.field).value = incoming.value;
 }
 
-function descriptor(item, slots) {
+function descriptor(item, slots, sources) {
   const slot = Object.hasOwn(slots, item.ycsSlot) && slots[item.ycsSlot];
   if (!slot) fail('Graphic has no configured display slot', 422);
   if (typeof item.relpath !== 'string' || !/^\/[a-zA-Z0-9_./-]+\.html?$/.test(item.relpath) || item.relpath.split('/').includes('..')) fail('Invalid template path', 422);
   const data = Object.fromEntries(item.DataFields.filter(field => field.field).map(field => [field.field, field.value ?? '']));
-  return { id: item.itemID, slot: item.ycsSlot, z: slot.order, exitMs: slot.exitMs ?? 250, template: '/templates' + item.relpath, data };
+  const links = {};
+  for (const [field, link] of Object.entries(item.ycsLinks || {})) {
+    if (!linkable(item, field)) continue;
+    const source = sources?.mapping(item.ycsStage, item.itemID, field);
+    links[field] = { ...link, source };
+    if (link.mode === 'linked') data[field] = sources?.value(source) ?? data[field];
+  }
+  return { id: item.itemID, slot: item.ycsSlot, z: slot.order, exitMs: slot.exitMs ?? 250, template: '/templates' + item.relpath, data, ...(Object.keys(links).length ? { links } : {}) };
 }
 
 class Playback extends EventEmitter {
-  constructor(repository, slots) {
+  constructor(repository, slots, sources) {
     super();
     this.repository = repository;
     this.slots = slots;
+    this.sources = sources;
     for (const [name, slot] of Object.entries(slots)) {
       if (!identifier.test(name) || !Number.isInteger(slot.order) || slot.order < 0 || slot.order > 9999) fail('Invalid display slot configuration');
     }
@@ -86,7 +95,7 @@ class Playback extends EventEmitter {
       const index = items.findIndex(item => item.slot === state.draft.slot);
       if (index < 0) items.push(clone(state.draft)); else items[index] = clone(state.draft);
     }
-    return { stage: stageId, mode, revision: state.revision, graphics: items.sort((a, b) => a.z - b.z) };
+    return { stage: stageId, mode, revision: state.revision, selected: state.draft?.id || null, graphics: items.sort((a, b) => a.z - b.z) };
   }
   queue(stageId, operation) {
     this.repository.stage(stageId);
@@ -102,18 +111,56 @@ class Playback extends EventEmitter {
     const rundown = await this.repository.read(stageId);
     return rundown.templates.map(item => ({ id: item.itemID, title: item.description, slot: item.ycsSlot }));
   }
-  command(stageId, graphicId, action, fields) {
+  async editor(stageId, graphicId) {
+    await this.sources?.ready;
+    const item = this.repository.item(await this.repository.read(stageId), graphicId);
+    const links = {};
+    for (const field of item.DataFields) if (linkable(item, field.field)) {
+      const saved = item.ycsLinks?.[field.field] || { mode: 'manual', manual: field.value ?? '' };
+      links[field.field] = { ...saved, source: this.sources?.mapping(stageId, graphicId, field.field) || null };
+    }
+    return { revision: item.ycsEditRevision || 0, fields: clone(item.DataFields), links };
+  }
+  command(stageId, graphicId, action, fields, options = {}) {
     if (!['play', 'stop', 'update', 'preview', 'save', 'continue'].includes(action)) fail('Unknown command');
     return this.queue(stageId, async () => {
       const rundown = await this.repository.read(stageId);
       const item = this.repository.item(rundown, graphicId);
-      fieldValues(item, fields); // all validation happens on a detached rundown
-      const graphic = descriptor(item, this.slots);
+      await this.sources?.ready;
+      const changesData = ['play', 'update', 'save', 'preview'].includes(action);
+      if (changesData && options.revision !== undefined && options.revision !== (item.ycsEditRevision || 0)) fail('This graphic was saved in another controller. Reload before continuing.', 409);
+      if (changesData && options.links !== undefined && (!options.links || typeof options.links !== 'object' || Array.isArray(options.links))) fail('Invalid field links');
+      if (changesData) {
+        // Validate every incoming value before filtering linked display values.
+        const checked = clone(item);
+        fieldValues(checked, fields);
+        const links = clone(item.ycsLinks || {});
+        for (const [field, link] of Object.entries(options.links || {})) {
+          if (!linkable(item, field) || !link || !['manual', 'linked'].includes(link.mode) || typeof link.manual !== 'string' || link.manual.length > 300) fail('Invalid field link');
+          if (link.mode === 'linked' && !this.sources?.mapping(stageId, graphicId, field)) fail('Assign a source in Data Manager before linking this field', 422);
+          links[field] = { mode: link.mode, manual: link.manual };
+        }
+        for (const field of item.DataFields) {
+          if (!linkable(item, field.field)) continue;
+          const link = links[field.field];
+          if (!link) continue;
+          const incoming = fields?.find(candidate => candidate.field === field.field);
+          if (link.mode === 'manual' && incoming) link.manual = incoming.value;
+          if (link.manual.length > 300) fail('Round text must be at most 300 characters');
+          // The persisted field remains the manual fallback, not a transient
+          // source value copied out of the editor's read-only input.
+          checked.DataFields.find(candidate => candidate.field === field.field).value = link.manual;
+        }
+        item.DataFields = checked.DataFields;
+        if (Object.keys(links).length) item.ycsLinks = links;
+      }
+      const graphic = descriptor({ ...item, ycsStage: stageId }, this.slots, this.sources);
       const state = this.state(stageId);
       const active = state.program.find(current => current.id === graphicId);
       if (action === 'preview') {
         state.draft = graphic;
       } else if (action === 'save') {
+        item.ycsEditRevision = (item.ycsEditRevision || 0) + 1;
         await this.repository.write(stageId, rundown);
         if (state.draft?.id === graphicId) state.draft = graphic;
       } else if (action === 'continue') {
@@ -134,13 +181,30 @@ class Playback extends EventEmitter {
           graphic.continuation = active.continuation;
           next = next.map(current => current.id === graphicId ? graphic : current);
         }
+        if (changesData) item.ycsEditRevision = (item.ycsEditRevision || 0) + 1;
         for (const candidate of rundown.templates) candidate.onair = String(next.some(current => current.id === candidate.itemID));
         await this.repository.write(stageId, rundown);
         state.program = next;
         if (state.draft?.id === graphicId && action !== 'stop') state.draft = graphic;
       }
       this.publish(stageId);
-      return this.snapshot(stageId, action === 'preview' || action === 'save' ? 'preview' : 'program');
+      return { ...this.snapshot(stageId, action === 'preview' || action === 'save' ? 'preview' : 'program'), editorRevision: item.ycsEditRevision || 0 };
+    });
+  }
+  refreshLinks(stageId) {
+    return this.queue(stageId, async () => {
+      const state = this.state(stageId);
+      let changed = false;
+      for (const graphic of [...state.program, ...(state.draft ? [state.draft] : [])]) {
+        for (const [field, link] of Object.entries(graphic.links || {})) {
+          const value = this.sources?.value(link.source);
+          if (link.mode === 'linked' && value !== undefined && value !== graphic.data[field]) {
+            graphic.data[field] = value;
+            changed = true;
+          }
+        }
+      }
+      if (changed) this.publish(stageId);
     });
   }
   clear(stageId) {

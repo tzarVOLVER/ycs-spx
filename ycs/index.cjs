@@ -2,12 +2,24 @@
 const express = require('express');
 const path = require('node:path');
 const { Playback, RundownRepository } = require('./playback.cjs');
+const { DataSources, linkable } = require('./data.cjs');
+const { Renderers } = require('./renderers.cjs');
 
 module.exports = function registerYCS(app, config, hooks = {}) {
   if (!config.ycs?.enabled) return;
   const settings = config.ycs;
   const repository = new RundownRepository(config.general.dataroot, settings.stages);
-  const playback = new Playback(repository, settings.slots);
+  const sources = new DataSources(settings.dataFile || path.resolve(config.general.dataroot, '../ycs-data.json'), settings.stages);
+  const playback = new Playback(repository, settings.slots, sources);
+  const renderers = new Renderers();
+  const updateLinks = () => {
+    for (const stage of settings.stages) playback.refreshLinks(stage.id).catch(error => console.error('[YCS data]', error.message));
+  };
+  sources.on('change', updateLinks);
+  sources.ready.catch(error => console.error('[YCS data]', error.message));
+  const sourceTimer = setInterval(() => sources.refresh().catch(error => console.error('[YCS data]', error.message)), 1000);
+  sourceTimer.unref();
+  playback.close = () => { clearInterval(sourceTimer); sources.off('change', updateLinks); };
   const auth = hooks.auth || require('../utils/spx_auth.js');
   const router = express.Router();
   const handlers = handler => (req, res, next) => Promise.resolve().then(() => handler(req, res)).catch(next);
@@ -29,6 +41,7 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     next();
   }
 
+  app.get('/ycs/data-manager', auth.CheckLogin, (req, res) => res.sendFile(path.join(__dirname, 'public/data-manager.html')));
   app.use('/ycs', express.static(path.join(__dirname, 'public')));
   if (settings.graphicsRoot) app.use('/templates/ycs/ticker', express.static(path.resolve(settings.graphicsRoot)));
   app.use('/templates/ycs-system', express.static(path.join(__dirname, 'templates')));
@@ -37,8 +50,23 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     res.sendFile(path.join(__dirname, 'public/output.html'));
   }));
   router.use(sameOrigin, apiAccess);
+  router.get('/data', handlers(async (req, res) => { await sources.ready; res.json(sources.snapshot()); }));
+  router.post('/data/source', handlers(async (req, res) => res.json(await sources.updateSource(req.body.id, req.body.value, req.body.revision))));
+  router.post('/data/mapping', handlers(async (req, res) => {
+    const { stage, graphic, field, source, revision } = req.body;
+    const item = repository.item(await repository.read(stage), graphic);
+    if (!linkable(item, field)) return res.status(422).json({ error: 'The first data-link test supports the ticker Current round field (f5)' });
+    res.json(await sources.updateMapping({ stage, graphic, field, source }, revision));
+  }));
   router.get('/stages', (req, res) => res.json([...repository.stages.values()].map(({ id, title, project, rundown }) => ({ id, title, controller: `/gc/${project}/${rundown}` }))));
   router.get('/stages/:stage/graphics', handlers(async (req, res) => res.json(await playback.catalog(req.params.stage))));
+  router.get('/stages/:stage/graphics/:graphic/editor', handlers(async (req, res) => res.json(await playback.editor(req.params.stage, req.params.graphic))));
+  router.get('/stages/:stage/health', handlers(async (req, res) => res.json(renderers.snapshot(req.params.stage, playback.state(req.params.stage).revision))));
+  router.post('/stages/:stage/:mode/report', handlers(async (req, res) => {
+    playback.snapshot(req.params.stage, req.params.mode);
+    renderers.report(req.params.stage, req.params.mode, req.body);
+    res.sendStatus(204);
+  }));
   router.get('/stages/:stage/:mode/state', handlers(async (req, res) => res.json(playback.snapshot(req.params.stage, req.params.mode))));
   router.get('/stages/:stage/:mode/events', (req, res, next) => {
     try {
@@ -56,7 +84,7 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     } catch (error) { next(error); }
   });
   router.post('/stages/:stage/graphics/:graphic/:action', handlers(async (req, res) => {
-    res.json(await playback.command(req.params.stage, req.params.graphic, req.params.action, req.body?.fields));
+    res.json(await playback.command(req.params.stage, req.params.graphic, req.params.action, req.body?.fields, { links: req.body?.links, revision: req.body?.revision }));
   }));
   router.post('/stages/:stage/clear', handlers(async (req, res) => res.json(await playback.clear(req.params.stage))));
   app.use('/api/ycs', router);
