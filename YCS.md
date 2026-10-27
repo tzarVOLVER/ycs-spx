@@ -66,6 +66,12 @@ The connector uses Google's documented [public spreadsheet query endpoint](https
 
 In Sources, add a connection name, the original `https://docs.google.com/spreadsheets/d/.../edit` sharing URL, an optional worksheet name/numeric gid and an A1 range. The URL's `gid` selects its tab when Worksheet is blank. Ranges are bounded to **200 rows × 32 columns**; the form previews the first ten rows/eight columns. Refresh intervals are **5–3600 seconds** under Refresh settings. Test before saving; editing the target invalidates the test. The save re-reads the range rather than trusting browser preview data.
 
+The **Worksheet** dropdown loads actual tab names from the public sheet when the URL is entered or a connection is opened. The URL's gid selects the matching tab. Use the refresh button to reload the list. **Enter a tab name or gid…** provides a manual fallback if discovery is unavailable. Discovery reads bounded public HTML metadata, parses only tab-name/gid scalar descriptors, and never evaluates its scripts or follows embedded links. This is a compatibility parser for Google's public viewer, not the authenticated Sheets API; a Google markup change can make discovery unavailable while manual tab selection and normal data reads continue working.
+
+The grid button next to **Data range** opens a read-only **Select data range** dialog. Drag from one cell to another (in either direction), or use Shift + arrow keys, to select a rectangle. **Use range** copies the A1 selection into the connection draft and invalidates its previous connection test; **Cancel** and Escape leave the form untouched. Test and Save still happen in the parent form. No picker action saves configuration, edits the sheet or sends playout commands.
+
+The picker initially loads a bounded neighborhood containing the current selection, usually 100 rows × 26 columns. Sticky row/column headers, scrolling and drag-edge auto-scroll support larger selections. Edit **Preview window** or use row/column navigation buttons to browse farther; each window and saved selection is limited to 200 rows × 32 columns. Empty cells are selectable, allowing a range to include future rows. Existing in-use connection targets remain locked; create another connection to change the sheet, tab or range.
+
 One background read refreshes the connection's dataset for all mapped fields and stages. At most four scheduled reads run together; concurrent refresh requests for a connection are coalesced. Requests time out after eight seconds and failed reads back off up to one hour. Google may cache responses, so last read is not the cell's modification time and the interval does not guarantee instantaneous updates. Cell values use formatted text and must be nonempty and at most 300 characters.
 
 The server loads saved configuration and starts polling without a Data Manager or rundown browser open. `.local/ycs-data.json` (or `ycs.dataFile`) stores version 2 connections, local/legacy sources, stage/graphic mappings and stage/template defaults. Atomic saves advance `revision`; manual external edits must also advance it. Missing/invalid JSON retains the last valid configuration and blocks further saves until repaired.
@@ -79,6 +85,7 @@ Publish-to-web `/d/e/...` URLs, restricted sheets and arbitrary HTTP/CSV endpoin
 Additional API routes use the same origin/auth rules as stage commands:
 
 - `GET /api/ycs/data`: configuration, connection health, datasets, usages and resolved source values.
+- `POST /api/ycs/data/sheets/worksheets`: `{url}` → public worksheet names and gids, without changing configuration.
 - `POST /api/ycs/data/sheets/test`: `{settings:{url,worksheet,range,refreshSeconds}}` → read-only preview.
 - `POST /api/ycs/data/connections`: `{id?,label,settings,revision}` → saved connection and snapshot.
 - `POST /api/ycs/data/connections/:id/refresh`: immediate refresh.

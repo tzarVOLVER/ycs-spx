@@ -70,8 +70,8 @@ function parseResponse(raw, range) {
     return { address: columnName(selected.firstColumn + column) + (selected.firstRow + row), value: value.slice(0, 301), usable: usable(value) };
   }));
 }
-async function readLimited(response) {
-  if (Number(response.headers.get('content-length')) > MAX_BODY) fail('Sheet response is too large; choose a smaller range', 502);
+async function readLimited(response, limit = MAX_BODY) {
+  if (Number(response.headers.get('content-length')) > limit) fail('Sheet response is too large; choose a smaller range', 502);
   if (!response.body) fail('Google returned no sheet data', 502);
   const reader = response.body.getReader(), decoder = new TextDecoder();
   let size = 0, raw = '';
@@ -79,7 +79,7 @@ async function readLimited(response) {
     while (true) {
       const { done, value } = await reader.read(); if (done) break;
       size += value.byteLength;
-      if (size > MAX_BODY) fail('Sheet response is too large; choose a smaller range', 502);
+      if (size > limit) fail('Sheet response is too large; choose a smaller range', 502);
       raw += decoder.decode(value, { stream: true });
     }
     return raw + decoder.decode();
@@ -87,6 +87,21 @@ async function readLimited(response) {
 }
 class PublicSheets {
   constructor(fetcher = fetch) { this.fetcher = fetcher; }
+  async worksheets(input, { signal } = {}) {
+    const settings = normalizeSettings({ url: input?.url, range: 'A1', refreshSeconds: 5 });
+    const timeout = new AbortController(), timer = setTimeout(() => timeout.abort(), 8000); timer.unref?.();
+    try {
+      const response = await this.fetcher(settings.url.replace('/edit', '/htmlview'), {
+        signal: signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal,
+        redirect: 'manual', credentials: 'omit', referrerPolicy: 'no-referrer', headers: { Accept: 'text/html' }
+      });
+      if (response.status !== 200) fail('Could not list worksheets. Check public sharing or enter a tab name/gid manually.', 502);
+      return { worksheets: parseWorksheets(await readLimited(response, 2097152)), selected: settings.worksheet };
+    } catch (error) {
+      if (error.status) throw error;
+      fail('Could not list worksheets. Retry or enter a tab name/gid manually.', 502);
+    } finally { clearTimeout(timer); }
+  }
   async read(input, { singleCell = false, signal } = {}) {
     const settings = normalizeSettings(input), range = singleCell ? settings.cell : settings.range;
     if (!range) fail('Choose a cell before saving the source');
@@ -108,4 +123,21 @@ class PublicSheets {
     } finally { clearTimeout(timer); }
   }
 }
-module.exports = { PublicSheets, normalizeSettings, parseRange, parseResponse, endpoint, usable };
+function parseWorksheets(raw) {
+  // The public HTML viewer contains scalar tab descriptors. Treat its response
+  // only as data: never execute scripts, follow embedded URLs or render HTML.
+  // This is a compatibility parser, not the authenticated Sheets metadata API.
+  const quoted = '"(?:\\\\.|[^"\\\\])*"';
+  const pattern = new RegExp('items\\.push\\(\\{\\s*name:\\s*(' + quoted + '),\\s*pageUrl:\\s*' + quoted + ',\\s*gid:\\s*"(\\d{1,16})"', 'g');
+  const worksheets = [], seen = new Set();
+  for (const match of raw.matchAll(pattern)) {
+    let name;
+    try { name = JSON.parse(match[1].replace(/\\x([0-9a-f]{2})/gi, '\\u00$1')); } catch { continue; }
+    if (typeof name !== 'string' || !name.trim() || name.length > 100 || /[\u0000-\u001f]/.test(name) || seen.has(match[2])) continue;
+    seen.add(match[2]); worksheets.push({ id: match[2], name });
+    if (worksheets.length > 200) fail('Too many worksheet tabs to preview; enter the tab name/gid manually.', 502);
+  }
+  if (!worksheets.length) fail('Worksheet list unavailable. Check public sharing or enter a tab name/gid manually.', 502);
+  return worksheets;
+}
+module.exports = { PublicSheets, normalizeSettings, parseRange, parseResponse, parseWorksheets, endpoint, usable };

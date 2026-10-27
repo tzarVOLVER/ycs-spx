@@ -35,17 +35,19 @@ function renderLocal() {
     form.onsubmit = async event => { event.preventDefault(); save.disabled = true; try { state = await request('/data/source', { id, value: input.value, revision: state.revision }); message('Test value published to committed linked fields.'); } catch (error) { message(error.message, true); } finally { save.disabled = false; } }; $('local-sources').append(form);
   }
 }
-function settings() { return { url: $('sheet-url').value, worksheet: $('sheet-worksheet').value, range: $('sheet-range').value, refreshSeconds: Number($('sheet-refresh').value) }; }
+function settings() { return { url: $('sheet-url').value, worksheet: sheetPicker.worksheet, range: $('sheet-range').value, refreshSeconds: Number($('sheet-refresh').value) }; }
 function openConnection(id = null) {
   editingId = id; tested = ''; draftRevision = state.revision; const connection = state.connections[id];
-  $('connection-form').reset(); $('sheet-label').value = connection?.label || ''; $('sheet-url').value = connection?.settings.url || ''; $('sheet-worksheet').value = connection?.settings.worksheet || ''; $('sheet-range').value = connection?.settings.range || 'A1:D4'; $('sheet-refresh').value = connection?.settings.refreshSeconds || 5;
+  $('connection-form').reset(); $('sheet-label').value = connection?.label || ''; $('sheet-url').value = connection?.settings.url || ''; $('sheet-range').value = connection?.settings.range || 'A1:D4'; $('sheet-refresh').value = connection?.settings.refreshSeconds || 5;
   $('connection-title').textContent = id ? 'Edit connection' : 'Add connection'; $('sheet-preview').replaceChildren(); $('sheet-test-status').textContent = ''; $('save-sheet').disabled = true;
   $('connection-usage').textContent = connection?.usages.length ? `Used by ${connection.usages.length} field references. You can change its name or refresh interval. Add a new connection to change the sheet, tab or range.` : '';
-  for (const key of ['sheet-url', 'sheet-worksheet', 'sheet-range']) $(key).readOnly = Boolean(connection?.usages.length);
-  $('connection-dialog').showModal(); $('sheet-label').focus();
+  for (const key of ['sheet-url', 'sheet-range']) $(key).readOnly = Boolean(connection?.usages.length);
+  $('connection-dialog').showModal(); sheetPicker.reset({ worksheet: connection?.settings.worksheet || '', locked: Boolean(connection?.usages.length) }); $('sheet-label').focus();
 }
 $('add-connection').onclick = () => openConnection(); $('close-connection').onclick = () => $('connection-dialog').close();
-for (const input of document.querySelectorAll('[data-setting]')) input.addEventListener('input', () => { tested = ''; $('save-sheet').disabled = true; $('sheet-test-status').textContent = 'Test the updated settings before saving.'; });
+function invalidateSheetTest() { tested = ''; $('save-sheet').disabled = true; $('sheet-test-status').textContent = 'Test the updated settings before saving.'; }
+const sheetPicker = new window.YCSSheetPicker({ request, invalidate: invalidateSheetTest });
+for (const input of document.querySelectorAll('[data-setting]')) input.addEventListener('input', invalidateSheetTest);
 function previewTable(data) {
   $('sheet-preview').replaceChildren(); const table = node('table'), body = node('tbody');
   for (const cells of data.slice(0, 10)) { const row = node('tr'); row.append(node('th', cells[0]?.address.match(/\d+$/)?.[0] || '')); for (const cell of cells.slice(0, 8)) { const value = node('td', cell.value); value.title = cell.address; row.append(value); } body.append(row); }
@@ -139,4 +141,4 @@ async function initialize() {
   const params = new URLSearchParams(location.search); if (stages.some(stage => stage.id === params.get('stage'))) $('mapping-stage').value = params.get('stage'); if (params.get('graphic')) showTab('mappings');
   renderConnections(); renderLocal(); await loadGraphics(); await poll();
 }
-initialize().catch(error => message(error.message, true)); const timer = setInterval(poll, 3000); window.addEventListener('pagehide', () => { disposed = true; clearInterval(timer); }, { once: true });
+initialize().catch(error => message(error.message, true)); const timer = setInterval(poll, 3000); window.addEventListener('pagehide', () => { disposed = true; sheetPicker.dispose(); clearInterval(timer); }, { once: true });

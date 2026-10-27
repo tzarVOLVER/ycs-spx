@@ -26,6 +26,7 @@ async function fixture(t) {
     else result = data;
     return { ok: true, json: async () => structuredClone(result) };
   };
+  window.eval(await fs.readFile(path.join(__dirname, '../public/sheet-picker.js'), 'utf8'));
   window.eval(await fs.readFile(path.join(__dirname, '../public/data-manager.js'), 'utf8')); await flush();
   t.after(() => { window.dispatchEvent(new window.Event('pagehide')); window.close(); });
   const set = (id, value) => { const input = window.document.getElementById(id); input.value = value; input.dispatchEvent(new window.Event('input', { bubbles: true })); };

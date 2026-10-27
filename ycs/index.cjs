@@ -56,6 +56,7 @@ module.exports = function registerYCS(app, config, hooks = {}) {
   router.get('/data', handlers(async (req, res) => { await sources.ready; res.json(sources.snapshot()); }));
   router.post('/data/source', handlers(async (req, res) => res.json(await sources.updateSource(req.body.id, req.body.value, req.body.revision))));
   router.post('/data/sheets/test', handlers(async (req, res) => res.json(await sources.testSheet(req.body.settings))));
+  router.post('/data/sheets/worksheets', handlers(async (req, res) => res.json(await sources.sheets.worksheets({ url: req.body.url }))));
   router.post('/data/sheets', handlers(async (req, res) => res.json(await sources.addSheet(req.body.label, req.body.settings, req.body.revision))));
   router.post('/data/sheets/:id/refresh', handlers(async (req, res) => res.json(await sources.refreshSheet(req.params.id))));
   router.post('/data/mapping', handlers(async (req, res) => {

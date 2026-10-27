@@ -9,7 +9,7 @@ const { fixture } = require('./playback.test.cjs');
 test('public Sheets HTTP workflow tests and maps a source without autoplay, then refreshes committed links', async t => {
   const { root, stages } = await fixture(t), app = express(); app.use(express.json());
   let value = 'SHEET ROUND', reads = 0;
-  const sheets = { read: async (settings, options) => { reads++; return options?.singleCell ? { value } : { settings: normalizeSettings(settings), rows: [[{ address: 'A2', value, usable: true }]] }; } };
+  const sheets = { worksheets: async ({ url }) => { normalizeSettings({ url, range: 'A1', refreshSeconds: 5 }); return { worksheets: [{ id: '42', name: 'Stage 1' }], selected: '42' }; }, read: async (settings, options) => { reads++; return options?.singleCell ? { value } : { settings: normalizeSettings(settings), rows: [[{ address: 'A2', value, usable: true }]] }; } };
   const playback = register(app, { general: { dataroot: root, username: '' }, ycs: { enabled: true, dataFile: path.join(root, 'sources.json'), stages, slots: { ticker: { order: 10 }, 'lower-third': { order: 20 } } } }, { sheets, auth: { CheckLogin: (req, res, next) => next() } });
   t.after(() => playback.close());
   const server = await new Promise(resolve => { const running = app.listen(0, '127.0.0.1', () => resolve(running)); });
@@ -20,6 +20,9 @@ test('public Sheets HTTP workflow tests and maps a source without autoplay, then
   const original = await fetch(base + '/api/ycs/data').then(response => response.json());
   assert.equal((await post('/api/ycs/data/sheets/test', { settings }, { Origin: 'https://untrusted.example' })).status, 403);
   assert.equal((await post('/api/ycs/data/sheets/test', { settings: { ...settings, url: 'http://127.0.0.1/private' } })).status, 400); assert.equal(reads, 0);
+  const tabs = await post('/api/ycs/data/sheets/worksheets', { url: settings.url }); assert.equal(tabs.status, 200); assert.equal((await tabs.json()).worksheets[0].name, 'Stage 1');
+  assert.equal((await post('/api/ycs/data/sheets/worksheets', { url: settings.url }, { Origin: 'https://untrusted.example' })).status, 403);
+  assert.equal((await fetch(base + '/api/ycs/data').then(response => response.json())).revision, original.revision);
   assert.equal((await post('/api/ycs/data/sheets/test', { settings })).status, 200);
   const add = await post('/api/ycs/data/sheets', { label: 'Public round', settings, revision: original.revision });
   assert.equal(add.status, 200); const { sourceId, snapshot } = await add.json();
