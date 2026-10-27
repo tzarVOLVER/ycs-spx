@@ -80,5 +80,5 @@ test('multiple ordinary text fields link independently while hidden identity and
   await r.playback.command('stage-1', 'ticker', 'update', undefined, { links: { f4: { mode: 'manual', manual: 'CUSTOM' } } });
   const changed = table(); changed[1][1].value = 'NEW ROUND'; changed[1][2].value = 'FINISHED'; r.set(changed); await r.sources.refreshSheet(connectionId); await r.playback.refreshLinks('stage-1');
   const data = r.playback.snapshot('stage-1', 'program').graphics[0].data; assert.equal(data.f4, 'CUSTOM'); assert.equal(data.f5, 'NEW ROUND');
-  for (const field of ['f0', 'f2']) await assert.rejects(r.playback.command('stage-1', 'ticker', 'preview', undefined, { links: { [field]: { mode: 'linked', manual: 'x' } } }), { status: 400 });
+  for (const field of ['f0']) await assert.rejects(r.playback.command('stage-1', 'ticker', 'preview', undefined, { links: { [field]: { mode: 'linked', manual: 'x' } } }), { status: 400 });
 });

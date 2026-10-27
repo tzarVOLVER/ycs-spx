@@ -33,6 +33,14 @@ if (stage) {
     }
     model.badge.hidden = !changed; model.badge.textContent = current ? 'Pending · Update on air to apply' : 'Unsaved draft';
   }
+  function editorValue(input,value) {
+    const text=String(value);
+    if(input.type==='checkbox'){if(['1','true','yes','on'].includes(text.toLowerCase()))return '1';if(['0','false','no','off'].includes(text.toLowerCase()))return '0';throw new Error('Expected a boolean');}
+    if(input.type==='number'){if(!text.trim()||!Number.isFinite(Number(text)))throw new Error('Expected a number');return String(Number(text));}
+    return text;
+  }
+  function showValue(input,value){if(input.type==='checkbox')input.checked=String(value)==='1';else{if(input.tagName==='SELECT'&&![...input.options].some(option=>option.value===String(value))){const option=document.createElement('option');option.value=String(value);option.textContent=String(value);option.dataset.ycsValue='true';input.append(option);}input.value=value;}}
+  function manualValue(input){return input.type==='checkbox'?(input.checked?'1':'0'):input.value;}
   function paintLink(row, model) {
     for (const [field, widget] of Object.entries(model.widgets || {})) {
       const link = model.links[field], { input, button, detail, title } = widget;
@@ -44,15 +52,16 @@ if (stage) {
         link.source = nextSource;
       }
       const source = sourceState?.sources[link.source], linked = link.mode === 'linked';
-      if (source?.value !== undefined) link.lastValue = source.value;
-      const value = source?.value ?? link.lastValue ?? link.manual, changed = linked && input.value !== value;
-      if (linked) input.value = value;
-      input.readOnly = linked; input.classList.toggle('ycs-linked-input', linked);
+      let incompatible=false;
+      if(source?.value!==undefined){try{link.lastValue=editorValue(input,source.value);}catch{incompatible=true;}}
+      const value = source?.value ?? link.lastValue ?? link.manual, changed = linked && manualValue(input) !== value;
+      if (linked) showValue(input,value);
+      input.readOnly = linked; if(input.type==='checkbox'||input.tagName==='SELECT')input.disabled=linked; input.classList.toggle('ycs-linked-input', linked);
       button.setAttribute('aria-pressed', String(linked)); button.setAttribute('aria-label', linked ? 'Use manual ' + title : 'Link ' + title + ' to data source');
       button.title = linked ? 'Linked — click to restore manual text' : 'Manual — click to link'; button.classList.toggle('is-linked', linked);
-      const problem = !source || sourceState?.health !== 'ok' || (source.health && source.health !== 'ok') || source.warning;
+      const problem = incompatible || !source || sourceState?.health !== 'ok' || (source.health && source.health !== 'ok') || source.warning;
       button.classList.toggle('is-warning', linked && Boolean(problem));
-      detail.textContent = linked ? `${source?.label || 'Source unavailable'}${problem ? ' · holding last valid value / manual fallback' : ''}` : link.source ? 'Manual override · ' + source.label : 'Manual · source unassigned';
+      detail.textContent = linked ? `${source?.label || 'Source unavailable'}${problem ? ' · holding last valid value / manual fallback' : ''}` : link.source ? 'Manual override · ' + (source?.label||'unavailable source') : 'Manual · source unassigned';
       if (changed && row.classList.contains('inFocus')) schedulePreview(row);
     }
     pending(row, model);
@@ -95,10 +104,10 @@ if (stage) {
         model.widgets[field] = { input, button, detail, title };
         button.addEventListener('click', event => {
           event.stopPropagation();
-          if (link.mode === 'manual') { if (!link.source) { notify('Assign a source using Manage field mappings first.', true); return; } link.manual = input.value; link.mode = 'linked'; }
-          else { link.mode = 'manual'; input.value = link.manual; }
+          if (link.mode === 'manual') { if (!link.source) { notify('Assign a source using Manage field mappings first.', true); return; } link.manual = manualValue(input); link.mode = 'linked'; }
+          else { link.mode = 'manual'; showValue(input,link.manual); }
           row.dataset.spxChanged = 'true'; paintLink(row, model); send(row, 'preview');
-        }); input.value = link.manual;
+        }); showValue(input,link.manual);
       }
       paintLink(row, model);
     }).catch(error => { notify(error.message, true); throw error; }); model.ready.catch(() => {});
@@ -134,7 +143,7 @@ if (stage) {
     const row = event.target.closest('.itemrow'); if (!row || !event.target.matches('[data-update]')) return;
     const model = models.get(row.dataset.spxEpoch);
     const link = model?.links[event.target.dataset.update];
-    if (link?.mode === 'manual') link.manual = event.target.value;
+    if (link?.mode === 'manual') link.manual = manualValue(event.target);
     row.dataset.spxChanged = 'true'; if (model) pending(row, model);
     schedulePreview(row);
   });

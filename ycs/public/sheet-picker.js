@@ -6,10 +6,11 @@ window.YCSSheetPicker = class SheetPicker {
     this.sequence = 0; this.previewSequence = 0; this.session = 0; this.tabs = []; this.dragging = false;
     this.$('load-worksheets').onclick = () => this.loadTabs();
     this.$('sheet-url').addEventListener('input', () => {
+      if(this.enabled===false)return;
       this.sequence++; this.$('load-worksheets').disabled = false; this.tabs = []; this.manual = ''; this.setOptions('', []); this.$('sheet-tabs-status').textContent = '';
       clearTimeout(this.debounce); this.debounce = setTimeout(() => { if (this.$('sheet-url').validity.valid && this.$('sheet-url').value) this.loadTabs(); }, 650);
     });
-    this.$('sheet-url').addEventListener('change', () => { clearTimeout(this.debounce); if (this.$('sheet-url').value) this.loadTabs(); });
+    this.$('sheet-url').addEventListener('change', () => { clearTimeout(this.debounce); if (this.enabled!==false && this.$('sheet-url').value) this.loadTabs(); });
     this.$('sheet-worksheet').onchange = () => { this.manual = this.worksheet; this.updateManual(); this.invalidate(); };
     this.$('sheet-worksheet-manual').oninput = () => { this.manual = this.$('sheet-worksheet-manual').value; this.invalidate(); };
     this.$('select-range').onclick = () => this.openRange();
@@ -40,13 +41,13 @@ window.YCSSheetPicker = class SheetPicker {
   }
   get worksheet() { return this.locked ? this.originalWorksheet : this.$('sheet-worksheet').value === '__manual__' ? this.$('sheet-worksheet-manual').value.trim() : this.$('sheet-worksheet').value; }
   urlTab() { try { const url = new URL(this.$('sheet-url').value); return url.searchParams.get('gid') || new URLSearchParams(url.hash.slice(1)).get('gid') || ''; } catch { return ''; } }
-  reset({ worksheet = '', locked = false }) {
+  reset({ worksheet = '', locked = false,enabled=true }) {
     this.session++; this.sequence++; this.previewSequence++; clearTimeout(this.debounce); this.endDrag();
-    this.locked = locked; this.originalWorksheet = worksheet; this.manual = worksheet; this.tabs = [];
+    this.enabled=enabled; this.locked = locked; this.originalWorksheet = worksheet; this.manual = worksheet; this.tabs = [];
     this.$('load-worksheets').disabled = false; this.$('sheet-worksheet-manual').value = worksheet; this.setOptions(worksheet, []);
     this.$('sheet-worksheet').disabled = locked; this.$('sheet-worksheet-manual').readOnly = locked;
     this.$('select-range').disabled = locked; this.$('sheet-tabs-status').textContent = '';
-    if (this.$('sheet-url').value) this.loadTabs();
+    if (this.enabled && this.$('sheet-url').value) this.loadTabs();
   }
   updateManual() { this.$('manual-worksheet-field').hidden = this.$('sheet-worksheet').value !== '__manual__'; }
   setOptions(desired, tabs) {
@@ -61,6 +62,7 @@ window.YCSSheetPicker = class SheetPicker {
     this.updateManual();
   }
   async loadTabs() {
+    if(this.enabled===false)return;
     const url = this.$('sheet-url').value.trim(); if (!url) { this.$('sheet-tabs-status').textContent = 'Enter a Google Sheets URL first.'; return; }
     const generation = ++this.sequence, session = this.session, desired = this.worksheet || this.urlTab();
     this.$('load-worksheets').disabled = true; this.$('sheet-tabs-status').textContent = 'Loading worksheets…';

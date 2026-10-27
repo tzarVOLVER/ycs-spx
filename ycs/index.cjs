@@ -9,7 +9,7 @@ module.exports = function registerYCS(app, config, hooks = {}) {
   if (!config.ycs?.enabled) return;
   const settings = config.ycs;
   const repository = new RundownRepository(config.general.dataroot, settings.stages);
-  const sources = new DataSources(settings.dataFile || path.resolve(config.general.dataroot, '../ycs-data.json'), settings.stages, { sheets: hooks.sheets });
+  const sources = new DataSources(settings.dataFile || path.resolve(config.general.dataroot, '../ycs-data.json'), settings.stages, { sheets: hooks.sheets, json: hooks.json });
   const playback = new Playback(repository, settings.slots, sources);
   const renderers = new Renderers();
   sources.activeReferences = () => [...playback.states].flatMap(([stage, state]) => state.program.flatMap(graphic => Object.entries(graphic.links || {}).filter(([, link]) => link.mode === 'linked').map(([field, link]) => ({ stage, graphic: graphic.id, field, source: link.source }))));
@@ -55,9 +55,10 @@ module.exports = function registerYCS(app, config, hooks = {}) {
   router.use(sameOrigin, apiAccess);
   router.get('/data', handlers(async (req, res) => { await sources.ready; res.json(sources.snapshot()); }));
   router.post('/data/source', handlers(async (req, res) => res.json(await sources.updateSource(req.body.id, req.body.value, req.body.revision))));
+  router.post('/data/json/test', handlers(async(req,res)=>res.json(await sources.json.read(req.body.settings))));
   router.post('/data/sheets/test', handlers(async (req, res) => res.json(await sources.testSheet(req.body.settings))));
   router.post('/data/sheets/worksheets', handlers(async (req, res) => res.json(await sources.sheets.worksheets({ url: req.body.url }))));
-  router.post('/data/sheets', handlers(async (req, res) => res.json(await sources.addSheet(req.body.label, req.body.settings, req.body.revision))));
+  router.post('/data/sheets', handlers(async (req, res) => res.json(await sources.addSheet(req.body.label, req.body.settings, req.body.revision, req.body.type, req.body.project))));
   router.post('/data/sheets/:id/refresh', handlers(async (req, res) => res.json(await sources.refreshSheet(req.params.id))));
   router.post('/data/mapping', handlers(async (req, res) => {
     const { stage, graphic, field, source, revision } = req.body;
@@ -65,20 +66,21 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     if (!linkable(item, field)) return res.status(422).json({ error: 'This template field does not support text linking' });
     res.json(await sources.updateMapping({ stage, graphic, field, source }, revision));
   }));
-  router.post('/data/connections', handlers(async (req, res) => res.json(await sources.saveConnection(req.body.id, req.body.label, req.body.settings, req.body.revision))));
+  router.post('/data/connections', handlers(async (req, res) => res.json(await sources.saveConnection(req.body.id, req.body.label, req.body.settings, req.body.revision, req.body.type, req.body.project))));
   router.post('/data/connections/:id/refresh', handlers(async (req, res) => res.json(await sources.refreshSheet(req.params.id))));
   router.post('/data/connections/:id/remove', handlers(async (req, res) => res.json(await sources.removeConnection(req.params.id, req.body.revision))));
   router.get('/data/mappings/:stage/:graphic', handlers(async (req, res) => {
     await sources.ready;
     const { stage, graphic } = req.params, item = repository.item(await repository.read(stage), graphic);
-    res.json({ revision: sources.snapshot().revision, template: item.relpath, fields: item.DataFields.filter(field => linkable(item, field.field)).map(field => ({ field: field.field, title: field.title || field.field, ...sources.effective(stage, graphic, field.field, item.relpath), source: sources.mapping(stage, graphic, field.field, item.relpath) || null })) });
+    res.json(await playback.mappingPreview(stage,graphic));
   }));
+  router.post('/data/mappings/:stage/:graphic/preview',handlers(async(req,res)=>res.json(await playback.mappingPreview(req.params.stage,req.params.graphic,req.body.edits))));
   router.post('/data/mappings/:stage/:graphic', handlers(async (req, res) => {
     const { stage, graphic } = req.params, item = repository.item(await repository.read(stage), graphic);
-    if (!Array.isArray(req.body.edits) || req.body.edits.some(edit => !linkable(item, edit.field))) return res.status(422).json({ error: 'Only text fields can be mapped' });
+    if (!Array.isArray(req.body.edits) || req.body.edits.some(edit => !linkable(item, edit.field))) return res.status(422).json({ error: 'This field cannot be mapped' });
     res.json(await sources.saveMappings(stage, graphic, item.relpath, req.body.edits, req.body.revision));
   }));
-  router.get('/stages', (req, res) => res.json([...repository.stages.values()].map(({ id, title, project, rundown }) => ({ id, title, controller: `/gc/${project}/${rundown}` }))));
+  router.get('/stages', (req, res) => res.json([...repository.stages.values()].map(({ id, title, project, rundown }) => ({ id, title, project, rundown, controller: `/gc/${project}/${rundown}` }))));
   router.get('/stages/:stage/graphics', handlers(async (req, res) => res.json(await playback.catalog(req.params.stage))));
   router.get('/stages/:stage/graphics/:graphic/editor', handlers(async (req, res) => res.json(await playback.editor(req.params.stage, req.params.graphic))));
   router.get('/stages/:stage/health', handlers(async (req, res) => res.json(renderers.snapshot(req.params.stage, playback.state(req.params.stage).revision))));

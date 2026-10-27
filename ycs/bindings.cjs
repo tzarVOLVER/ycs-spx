@@ -2,6 +2,10 @@
 const { parseRange, usable } = require('./public-sheets.cjs');
 function fail(message) { const error = new Error(message); error.status = 400; throw error; }
 function selection(input, settings) {
+  if (input?.kind === 'json') {
+    if(typeof input.pointer !== 'string' || input.pointer.length>2048 || (input.pointer && !/^\/(?:[^~]|~[01])*$/.test(input.pointer))) fail('Select a JSON property');
+    return {kind:'json',pointer:input.pointer};
+  }
   if (input?.kind === 'cell') {
     const cell = parseRange(input.cell), range = parseRange(settings.range);
     if (cell.firstRow !== cell.lastRow || cell.firstColumn !== cell.lastColumn || cell.firstRow < range.firstRow || cell.lastRow > range.lastRow || cell.firstColumn < range.firstColumn || cell.lastColumn > range.lastColumn) fail('Choose a cell inside the connection range');
@@ -13,6 +17,15 @@ function selection(input, settings) {
   return { kind: 'row', headerRow, keyColumn: input.keyColumn, keyValue: input.keyValue, valueColumn: input.valueColumn };
 }
 function resolve(rows, pick) {
+  if(pick.kind==='json') {
+    let value=rows;
+    for(const token of pick.pointer ? pick.pointer.slice(1).split('/').map(key=>key.replace(/~1/g,'/').replace(/~0/g,'~')) : []) {
+      if(value===null||typeof value!=='object'||!Object.hasOwn(value,token)) throw new Error('JSON property is missing');
+      value=value[token];
+    }
+    if(value===null||value===undefined||typeof value==='object'||!usable(String(value))) throw new Error('Select a nonempty text, number or boolean value');
+    return String(value);
+  }
   if (!Array.isArray(rows)) throw new Error('Waiting for the first successful read');
   let cell;
   if (pick.kind === 'cell') cell = rows.flat().find(cell => cell.address === pick.cell);
@@ -32,4 +45,15 @@ function resolve(rows, pick) {
   if (!cell || !usable(cell.value) || cell.usable === false) throw new Error('Selected value is empty or exceeds 300 characters');
   return cell.value;
 }
-module.exports = { selection, resolve };
+function transform(value,input) {
+  const kind=input?.kind||'none', text=String(value);
+  if(kind==='none')return text;if(kind==='uppercase')return text.toUpperCase();if(kind==='lowercase')return text.toLowerCase();if(kind==='trim')return text.trim();if(kind==='prefix')return input.value+text;
+  throw new Error('Unsupported transform');
+}
+function normalizeTransform(input) {
+  if(!input||input.kind==='none')return undefined;
+  if(!['uppercase','lowercase','trim','prefix'].includes(input.kind))fail('Unsupported transform');
+  if(input.kind==='prefix'&&(typeof input.value!=='string'||input.value.length>200))fail('Enter a prefix up to 200 characters');
+  return {kind:input.kind,...(input.kind==='prefix'?{value:input.value}:{})};
+}
+module.exports = { selection, resolve, transform, normalizeTransform };

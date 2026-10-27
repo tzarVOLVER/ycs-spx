@@ -5,6 +5,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { linkable } = require('./data.cjs');
+const {types,normalizeField}=require('./field-types.cjs');
 
 const clone = value => structuredClone(value);
 const identifier = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$/;
@@ -67,8 +68,9 @@ function descriptor(item, slots, sources) {
   for (const [field, link] of Object.entries(item.ycsLinks || {})) {
     if (!linkable(item, field)) continue;
     const source = sources?.mapping(item.ycsStage, item.itemID, field, item.relpath);
-    links[field] = { ...link, source };
-    if (link.mode === 'linked') data[field] = sources?.value(source) ?? data[field];
+    const definition=item.DataFields.find(item=>item.field===field);
+    links[field] = { ...link, source, definition:{ftype:definition.ftype,...(definition.items?{items:definition.items}:{})} };
+    if (link.mode === 'linked' && sources?.value(source)!==undefined) {try {data[field]=normalizeField(definition,sources.value(source));}catch{/* Retain the manual fallback for incompatible source values. */}}
   }
   return { id: item.itemID, slot: item.ycsSlot, z: slot.order, exitMs: slot.exitMs ?? 250, template: '/templates' + item.relpath, data, ...(Object.keys(links).length ? { links } : {}) };
 }
@@ -108,8 +110,9 @@ class Playback extends EventEmitter {
     for (const mode of ['program', 'preview']) this.emit(stageId + ':' + mode, this.snapshot(stageId, mode));
   }
   async catalog(stageId) {
+    await this.sources?.ready;
     const rundown = await this.repository.read(stageId);
-    return rundown.templates.map(item => ({ id: item.itemID, title: item.description || item.itemID, slot: item.ycsSlot, template: item.relpath, fields: item.DataFields.filter(field => linkable(item, field.field)).map(({ field, title }) => ({ field, title: title || field })) }));
+    return rundown.templates.map(item => ({ id:item.itemID,title:item.description||item.itemID,slot:item.ycsSlot,template:item.relpath,fields:item.DataFields.filter(field=>linkable(item,field.field)).map(field=>({field:field.field,title:field.title||field.field,ftype:field.ftype,type:types[field.ftype],required:field.required===true})),mapped:item.DataFields.filter(field=>linkable(item,field.field)&&this.sources?.mapping(stageId,item.itemID,field.field,item.relpath)).length }));
   }
   async editor(stageId, graphicId) {
     await this.sources?.ready;
@@ -120,6 +123,32 @@ class Playback extends EventEmitter {
       links[field.field] = { ...saved, source: this.sources?.mapping(stageId, graphicId, field.field, item.relpath) || null };
     }
     return { revision: item.ycsEditRevision || 0, title: item.description || graphicId, template: item.relpath, fields: clone(item.DataFields), links };
+  }
+  async mappingPreview(stageId,graphicId,edits=[]) {
+    await this.sources?.ready;
+    const item=this.repository.item(await this.repository.read(stageId),graphicId);
+    if(!Array.isArray(edits)||edits.length>100||new Set(edits.map(edit=>edit.field)).size!==edits.length)fail('Invalid field mappings');
+    if(edits.some(edit=>!linkable(item,edit.field)))fail('Unknown or protected field',422);
+    const graphic=descriptor(item,this.slots);
+    const fields=item.DataFields.filter(field=>linkable(item,field.field)).map(field=>{
+      const draft=edits.find(edit=>edit.field===field.field);
+      const effective=this.sources.effective(stageId,graphicId,field.field,item.relpath);
+      const pick=draft&&draft.scope!=='inherit'?draft.binding:draft?this.sources.document.defaults.find(entry=>entry.stage===stageId&&entry.template===item.relpath&&entry.field===field.field)?.binding||null:effective.binding;
+      let value=String(field.value??''),health='manual',error='';
+      if(pick) {
+        try {
+          const checked=require('./data.cjs').binding(this.sources.document,pick);
+          const connection=this.sources.document.connections[checked.connection||this.sources.document.sources[checked.source]?.binding?.connection];
+          if(connection?.project&&connection.project!==this.repository.stage(stageId).project)fail('This source belongs to another project',422);
+          const ref=this.sources.reference(checked), source=this.sources.resolveSnapshot(ref);
+          if(source.value===undefined)throw new Error(source.error||'Waiting for a valid source value');
+          value=normalizeField(field,source.value);health=source.health;error=source.error||'';
+        }catch(problem){health='error';error=problem.message;}
+      }
+      graphic.data[field.field]=value;
+      return {field:field.field,title:field.title||field.field,ftype:field.ftype,type:types[field.ftype],required:field.required===true,manual:String(field.value??''),binding:pick,origin:effective.origin,value,health,error};
+    });
+    return {revision:this.sources.snapshot().revision,template:item.relpath,title:item.description||graphicId,graphic,fields};
   }
   command(stageId, graphicId, action, fields, options = {}) {
     if (!['play', 'stop', 'update', 'preview', 'save', 'continue'].includes(action)) fail('Unknown command');
@@ -197,7 +226,8 @@ class Playback extends EventEmitter {
       let changed = false;
       for (const graphic of [...state.program, ...(state.draft ? [state.draft] : [])]) {
         for (const [field, link] of Object.entries(graphic.links || {})) {
-          const value = this.sources?.value(link.source);
+          let value = this.sources?.value(link.source);
+          if(value!==undefined){try{value=normalizeField(link.definition||{ftype:'textfield'},value);}catch{continue;}}
           if (link.mode === 'linked' && value !== undefined && value !== graphic.data[field]) {
             graphic.data[field] = value;
             changed = true;

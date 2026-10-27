@@ -18,15 +18,17 @@ async function fixture(t) {
     if (options?.method === 'POST') {
       const body = JSON.parse(options.body); posts.push({ target, body });
       if (target.endsWith('/test')) result = { rows };
+      else if(target.endsWith('/preview')) result={template:'/test.html',graphic:{id:'ticker',template:'/templates/test.html',data:{f5:'MANUAL'}},fields:[{field:'f5',value:'MANUAL',health:'ok'}]};
       else if (target.endsWith('/connections')) { data.revision++; data.connections['sheet.test'] = { label: body.label, settings: body.settings, rows, health: 'ok', usages: [], lastSuccess: new Date().toISOString() }; result = { connectionId: 'sheet.test', snapshot: data }; }
       else { data.revision++; result = data; }
-    } else if (target.endsWith('/stages')) result = [{ id: 'stage-1', title: 'Stage 1', controller: '/gc/Stage1/Show' }];
-    else if (target.endsWith('/graphics')) result = [{ id: 'ticker', title: 'Ticker' }];
-    else if (target.includes('/data/mappings/')) result = { revision: data.revision, template: '/test.html', fields: [{ field: 'f5', title: 'Current round', binding: null, origin: 'unassigned' }] };
+    } else if (target.endsWith('/stages')) result = [{ id: 'stage-1', title: 'Stage 1', controller: '/gc/Stage1/Show',project:'Stage1',rundown:'Show' }];
+    else if (target.endsWith('/graphics')) result = [{ id: 'ticker', title: 'Ticker',template:'/test.html',fields:[{field:'f5',title:'Current round'}],mapped:0 }];
+    else if (target.includes('/data/mappings/')) result = { revision: data.revision, template: '/test.html',title:'Ticker', fields: [{ field: 'f5', title: 'Current round',type:'Text',manual:'MANUAL',value:'MANUAL', binding: null, origin: 'unassigned' }] };
     else result = data;
     return { ok: true, json: async () => structuredClone(result) };
   };
   window.eval(await fs.readFile(path.join(__dirname, '../public/sheet-picker.js'), 'utf8'));
+  window.eval(await fs.readFile(path.join(__dirname, '../public/mapping-workspace.js'), 'utf8'));
   window.eval(await fs.readFile(path.join(__dirname, '../public/data-manager.js'), 'utf8')); await flush();
   t.after(() => { window.dispatchEvent(new window.Event('pagehide')); window.close(); });
   const set = (id, value) => { const input = window.document.getElementById(id); input.value = value; input.dispatchEvent(new window.Event('input', { bubbles: true })); };
@@ -42,16 +44,14 @@ test('connection editor tests a reusable dataset, renders literal values and nev
   assert.equal(r.posts.at(-1).body.settings.cell, undefined); assert.equal(document.querySelector('.connection h3').textContent, 'Show'); assert.equal(document.getElementById('connection-dialog').open, false);
   assert.ok(r.posts.every(post => !post.target.includes('/stages/')));
 });
-test('mapping drafts and local edits survive polling; row binding and template scope save together at the loaded revision', async t => {
-  const r = await fixture(t), document = r.window.document;
-  await r.connect(); document.getElementById('save-sheet').click(); await flush(); document.getElementById('reload-mappings').click(); await flush();
-  const source = document.querySelector('[aria-label="Current round source"]'); source.value = 'sheet.test'; source.dispatchEvent(new r.window.Event('change'));
-  const scope = document.querySelector('[aria-label="Current round mapping scope"]'); scope.value = 'default'; scope.dispatchEvent(new r.window.Event('change'));
-  const local = document.querySelector('.local-value input'); local.value = 'UNSAVED LOCAL';
-  const rowKey = [...document.querySelectorAll('.selector-fields label')].find(label => label.textContent.startsWith('Row key')).querySelector('input'); rowKey.value = 'STAGE 2'; rowKey.dispatchEvent(new r.window.Event('input'));
-  r.data.revision = 99; await r.poll(); assert.equal(source.value, 'sheet.test'); assert.equal(rowKey.value, 'STAGE 2'); assert.equal(local.value, 'UNSAVED LOCAL');
-  document.getElementById('save-mappings').click(); await flush(); const saved = r.posts.at(-1);
-  assert.equal(saved.body.revision, 1, 'polling must not silently refresh the revision of a mapping draft');
-  assert.equal(saved.body.edits[0].scope, 'default'); assert.equal(saved.body.edits[0].binding.selection.keyValue, 'STAGE 2'); assert.equal(saved.body.edits[0].binding.selection.valueColumn, 'Round');
-  assert.equal(saved.target, '/api/ycs/data/mappings/stage-1/ticker');
+test('visual mapping keeps field drafts and local edits during polling and saves with the loaded revision', async t => {
+  const r=await fixture(t), document=r.window.document;
+  await r.connect();document.getElementById('save-sheet').click();await flush();document.getElementById('reload-mappings').click();await flush();
+  const source=document.getElementById('mapping-source');source.value='sheet.test';source.dispatchEvent(new r.window.Event('change'));
+  document.querySelector('.source-card').click();
+  const local=document.querySelector('.local-value input');local.value='UNSAVED LOCAL';
+  r.data.revision=99;await r.poll();assert.equal(local.value,'UNSAVED LOCAL');
+  assert.equal(document.getElementById('save-mappings').disabled,false);document.getElementById('save-mappings').click();await flush();
+  const saved=r.posts.find(post=>post.target==='/api/ycs/data/mappings/stage-1/ticker');
+  assert.equal(saved.body.revision,1);assert.equal(saved.body.edits[0].binding.selection.kind,'cell');
 });

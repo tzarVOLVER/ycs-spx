@@ -38,6 +38,26 @@ Open a controller URL with the base address `http://127.0.0.1:5660`. Select the 
 
 Native Save changes the stage's saved fields. Typing previews pending values; Update commits them to an active program graphic. Updating a stopped graphic saves its data without putting it on air. STOP THIS STAGE clears only that stage. Configured stage playout/save requests bypass upstream's shared rundown cache. Legacy projects outside the configured stage list retain upstream behavior.
 
+## Visual mapping workspace
+
+The Mappings tab uses a three-panel layout: rundown graphics on the left, a real template monitor and field table in the middle, and browsable source values on the right. Project and rundown selectors use the configured SPX stage/project/rundown identities. Existing demo configuration has one SPX project per stage; the selectors do not invent production data or automatically register other SPX projects. Register additional outputs/rundowns under `ycs.stages` to include them. Connection definitions can optionally belong to one configured project; unscoped existing connections remain Shared. Project-specific connections are filtered in the browser and rejected by server mapping validation in another project.
+
+Select a field and click a source value, or drag a source card onto its field row. **Browse cells** exposes the complete saved sheet range, including empty cells; any sheet layout works. **Use a table row** optionally exposes columns from a selected header/data row. **Auto-map by name** fills only currently unmapped fields with a unique exact normalized field-name/header/property match. It does not guess semantic aliases or overwrite existing links. JSON responses appear as expandable property groups; array indexes and escaped object keys are stored as generated [JSON Pointer](https://www.rfc-editor.org/rfc/rfc6901) references.
+
+Each field row has Unmapped, Static value or a selected source binding, a transform, and the server-resolved preview value. Available transforms are None, Uppercase, Lowercase, Trim and Prefix text/media path. Numbers, checkboxes, text, textarea, choices, hex colours and image/file fields retain their native SPX string representations with type validation. Incompatible live values retain the existing on-air field value; mapping preview shows the manual fallback and reason. Hidden identity is protected. Object/array-to-collection mapping, schema transforms and media importing are not implemented; select a scalar JSON property or an individual array element property.
+
+The monitor is an isolated classic-SPX iframe with its own update/play lifecycle. Mapping preview has no output subscription, renderer health report or playout command. Changes update that monitor without replaying its animation. **Save mapping** writes only the selected graphic's changed bindings with the loaded revision. **Revert** reloads that selected graphic. Unsaved drafts are retained separately when switching graphics, projects or rundowns within the page; background polling never advances their configuration revision. A successful save made by this page advances other drafts only when they share that exact prior revision, since the page knows precisely which source or graphic it changed; unrelated concurrent edits still conflict. They are not persisted across page reloads. The rundown's manual/linked modes and explicit Play/Update remain authoritative for program.
+
+Reusable template defaults and row lookup remain under Advanced mapping options. A default belongs to the configured stage/rundown output and template; it does not change every production automatically.
+
+## JSON API connections
+
+Choose JSON API in Add connection, enter a public HTTPS JSON endpoint and refresh interval, optionally assign its project, then Test and Save. The server performs read-only GET requests, requires HTTP 200 with JSON content, follows no redirects and bounds responses to 1 MB with an eight-second timeout. Public DNS addresses are validated in the actual request lookup; loopback/private/link-local hosts and embedded credentials are rejected. LAN API support requires a separately designed explicit host configuration; this connector currently accepts public APIs only.
+
+Optional Bearer authentication uses an environment-variable reference beginning `YCS_DATA_`, such as `YCS_DATA_TOURNAMENT_TOKEN`. Set the variable before starting the server; the saved document/browser receives the variable name, never the token. No credential is embedded in a template. OAuth flows, custom headers and token refresh are not included. A source is polled once for all its fields with the same backoff, pinned bindings and restart caching as Sheets. API test does not create a source or change program.
+
+Additional routes: `POST /api/ycs/data/json/test` accepts `{settings:{url,refreshSeconds,tokenEnv?}}`; `/data/connections` accepts optional `type:'json-api'` and `project`. Field bindings also support `{static:'value',transform?}` or `{connection,selection:{kind:'json',pointer:'/event/name'},transform?}`. A transform is `{kind:'uppercase'|'lowercase'|'trim'}` or `{kind:'prefix',value:'media/guests/'}`. `POST /api/ycs/data/mappings/:stage/:graphic/preview` resolves unsaved edits into a graphic descriptor and field statuses without saving or modifying either stage composition.
+
 ## Data Manager and rundown workflow
 
 Open **Data Manager** from any stage panel. It has two views:
@@ -58,7 +78,7 @@ In the rundown, ordinary content fields have visible labels and a chain button. 
 
 A mapping change does not rebind an active graphic until Update/Play. Its previous committed selector keeps receiving live data in the meantime. Renaming a connection or changing its interval is allowed while used. Changing its sheet, tab or range is blocked while saved/default/on-air references exist: create a new connection and remap the fields instead. Remove is disabled until saved/default references are unassigned and on-air linked graphics are stopped. No connection deletion writes to Google Sheets.
 
-General text fields are supported, including the ticker's round, status, day/date, location and rounds-remaining text, and lower-third name/title. Checkboxes, numbers, artwork pickers and JSON fields remain manually controlled. Typed linking, transforms, private Sheets and general HTTP API adapters are future extensions.
+Native field types are supported, including the ticker's round, status, day/date, location and rounds-remaining text, and lower-third name/title. Checkboxes, numbers, image/file fields and choices can also be linked. Private Sheets, collection mapping and advanced transforms remain future extensions.
 
 ## Public Google Sheets runtime
 
@@ -80,7 +100,7 @@ Version 1 cell sources migrate automatically: identical connection settings are 
 
 Last good datasets and resolved field values are cached atomically beside the data file as `.sheets-cache.json`. Cache identity includes the connection target and selection, preventing cross-cell reuse. A missing/damaged cache falls back to each field's saved manual text until a successful read. Program always starts stopped after a server restart. Runtime updates do not advance the configuration revision or store transient live values in the configuration document. These ignored local files, backups and real sheet URLs are never committed.
 
-Publish-to-web `/d/e/...` URLs, restricted sheets and arbitrary HTTP/CSV endpoints are not accepted. Requests go only to `https://docs.google.com`, without cookies or redirects. Callback payloads are parsed as JSON, never evaluated as JavaScript. No dependency was added.
+Publish-to-web `/d/e/...` URLs, restricted sheets and arbitrary HTTP/CSV endpoints are not accepted by the Sheets adapter. Public HTTPS JSON APIs use the separate connector described above. Requests go only to `https://docs.google.com`, without cookies or redirects. Callback payloads are parsed as JSON, never evaluated as JavaScript. No dependency was added.
 
 Additional API routes use the same origin/auth rules as stage commands:
 
@@ -145,6 +165,6 @@ Run `npm test` for stage isolation, concurrent slots, replacement, preview safet
 
 The browser smoke test covers two native controllers, a ticker and lower third together, independent Stage 2 playout, and the program renderer. Companion integration is tested through its intended HTTP requests; a physical Stream Deck is not required. The Companion application/emulator itself has not yet been configured in this fork's first milestone.
 
-The data-link workflow supports ordinary text fields, reusable public Sheets datasets, cell/row selections, defaults and connection editing/removal. Typed fields/transforms, private Google authentication, HTTP API adapters, operator-specific preview sessions and final production deployment remain subsequent work. Companion's application/emulator is still not configured. No source credentials or user spreadsheet IDs are included in this repository.
+The data-link workflow supports native field types, basic transforms, reusable public Sheets/JSON API datasets, cell/row/property selections, project-scoped sources, defaults and connection editing/removal. Collection mapping, advanced authentication, production/output provisioning, operator-specific preview sessions and final deployment remain subsequent work. Companion's application/emulator is still not configured. No source credentials or user spreadsheet IDs are included in this repository.
 
 Upstream changes are intentionally limited: registration of the optional module, shared session middleware for the stage WebSocket namespace, an optional listener host, stage attributes/script/preview URL in the existing controller view, test scripts, and local-file ignore rules. Keep changes to upstream files small so upstream fixes can be merged.
