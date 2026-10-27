@@ -66,7 +66,7 @@ if (stage) {
             if (!link.source) { notify('Assign a source in Data Manager first.', true); return; }
             link.manual = input.value; link.mode = 'linked';
           } else { link.mode = 'manual'; input.value = link.manual; }
-          paintLink(row, model); send(row, 'preview');
+          row.dataset.spxChanged = 'true'; paintLink(row, model); send(row, 'preview');
         });
         input.value = editor.links.f5.manual; paintLink(row, model);
       }
@@ -86,6 +86,12 @@ if (stage) {
       if (action !== 'preview') {
         if (['play', 'update', 'save'].includes(action)) model.revision = result.editorRevision;
         notify(action === 'save' ? 'Saved. Program unchanged.' : `${row.dataset.spxEpoch}: ${action}`);
+        if (['play', 'update', 'save'].includes(action)) row.dataset.spxChanged = 'false';
+        if (action === 'save') {
+          const summary = row.querySelector('.truncate');
+          if (summary) summary.textContent = [...row.querySelectorAll('[data-update]')].filter(input => input.type !== 'hidden').slice(0, 2).map(input => input.type === 'checkbox' ? (input.checked ? '1' : '0') : input.value).join(' | ');
+          if (row.querySelector('#Expanded')?.style.display !== 'none') window.ToggleExpand?.(row);
+        }
       }
       return result;
     });
@@ -133,6 +139,8 @@ if (stage) {
       const playing = active.has(row.dataset.spxEpoch); row.dataset.spxOnair = String(playing);
       const hidden = row.querySelector('[name="RundownItem[onair]"]'); if (hidden) hidden.value = String(playing);
       const icon = row.querySelector('[data-spx-name="icon"]'); icon?.classList.toggle('playTrue', playing); icon?.classList.toggle('playFalse', !playing);
+      row.querySelector('[data-spx-name="updatebutton"]')?.classList.toggle('disabled', !playing);
+      for (const target of row.querySelectorAll('[data-spx-name="deletesmall"], [data-spx-name="deletelarge"]')) target.style.visibility = playing ? 'hidden' : 'visible';
       const button = row.querySelector('[data-spx-name="playbutton"]');
       if (button) {
         button.textContent = button.getAttribute(playing ? 'data-spx-stoptext' : 'data-spx-playtext');
