@@ -4,10 +4,43 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { LocalFiles, normalizeLocalSettings } = require('../local-files.cjs');
+const { LocalFiles, normalizeLocalSettings, filePath } = require('../local-files.cjs');
 const { DataSources } = require('../data.cjs');
+test('full file paths accept copied quotes, local drives and UNC shares without accepting device paths or alternate streams', () => {
+  const local = path.join(os.tmpdir(), 'Production Data', 'ticker.json');
+  assert.equal(filePath('  "' + local + '"  '), local);
+  assert.equal(
+    normalizeLocalSettings({ file: local, refreshSeconds: 5 }, 'local-json').file,
+    local
+  );
+  assert.throws(
+    () =>
+      normalizeLocalSettings(
+        { file: local, location: 'production', refreshSeconds: 5 },
+        'local-json'
+      ),
+    /full file path/
+  );
+  for (const file of [
+    '../ticker.json',
+    '\\\\?\\C:\\ticker.json',
+    '\\\\.\\C:\\ticker.json',
+    'ticker.json:stream',
+    'ticker.json\u0000'
+  ])
+    assert.throws(() => filePath(file));
+  if (process.platform === 'win32') {
+    const share = '\\\\DATA-PC\\ProductionData\\ticker.csv';
+    assert.equal(
+      normalizeLocalSettings({ file: share, refreshSeconds: 5 }, 'local-csv').file,
+      share
+    );
+    assert.throws(() => filePath('\\ticker.json'), /full drive/);
+    assert.throws(() => filePath('C:\\Data\\CON\\ticker.json'));
+  }
+});
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ycs-browser-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ycs-paths-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const local = path.join(root, 'local'),
     shared = path.join(root, 'shared');
@@ -19,7 +52,7 @@ async function fixture(t) {
   await fs.writeFile(path.join(shared, 'ignored.txt'), 'Not data');
   return { root, local, shared };
 }
-test('named locations browse only JSON/CSV and folders, with nested paths and stable legacy settings', async (t) => {
+test('legacy named locations and nested relative paths retain their settings and data', async (t) => {
   const f = await fixture(t),
     files = new LocalFiles(f.local, {
       locations: [{ id: 'production', label: 'Production data', path: f.shared }]
@@ -28,20 +61,6 @@ test('named locations browse only JSON/CSV and folders, with nested paths and st
   const descriptor = files.describe();
   descriptor.locations[0].path = 'wrong';
   assert.equal(files.describe().locations[0].path, f.local);
-  const root = await files.browse({ location: 'production', type: 'local-json' });
-  assert.deepEqual(
-    root.entries.map((entry) => [entry.name, entry.kind]),
-    [['Orlando', 'directory']]
-  );
-  const folder = await files.browse({
-    location: 'production',
-    directory: 'Orlando',
-    type: 'local-json'
-  });
-  assert.deepEqual(
-    folder.entries.map((entry) => entry.path),
-    ['Orlando/round.json']
-  );
   assert.equal(
     (await files.read({ location: 'production', file: 'Orlando\\round.json', refreshSeconds: 5 }))
       .data,
@@ -55,18 +74,6 @@ test('named locations browse only JSON/CSV and folders, with nested paths and st
     ),
     { file: 'round.json', refreshSeconds: 5 }
   );
-  for (const directory of [
-    '..',
-    '../shared',
-    'Orlando/../../outside',
-    'C:\\Data',
-    '\\\\other\\share',
-    '/absolute',
-    'Orlando//nested',
-    'Orlando/CON'
-  ])
-    await assert.rejects(files.browse({ location: 'production', directory }), /relative|location/);
-  await assert.rejects(files.browse({ location: 'unknown' }), /Unknown/);
   await assert.rejects(
     files.read({ location: 'production', file: '../local/round.json', refreshSeconds: 5 }),
     /relative/
@@ -101,17 +108,12 @@ test('folder junctions/symlinks cannot escape a configured location', async (t) 
     throw error;
   }
   const files = new LocalFiles(f.local);
-  assert.equal(
-    (await files.browse()).entries.some((entry) => entry.name === 'shortcut'),
-    false
-  );
-  await assert.rejects(files.browse({ directory: 'shortcut' }), /regular folder/);
   await assert.rejects(
     files.read({ file: 'shortcut/secret.json', refreshSeconds: 5 }),
     /regular folder/
   );
 });
-test('offline location timeouts coalesce OS work, keep local browsing responsive, and recover after the pending operation settles', async (t) => {
+test('offline full-path reads coalesce OS work, keep other files responsive and recover', async (t) => {
   const f = await fixture(t);
   let calls = 0,
     release;
@@ -121,9 +123,11 @@ test('offline location timeouts coalesce OS work, keep local browsing responsive
     io: {
       ...fs,
       realpath: async (file) => {
-        if (file === f.shared) {
+        if (file === path.join(f.shared, 'Orlando')) {
           calls++;
-          return new Promise((resolve) => (release = () => resolve(f.shared)));
+          return new Promise(
+            (resolve) => (release = () => resolve(path.join(f.shared, 'Orlando')))
+          );
         }
         return fs.realpath(file);
       }
@@ -131,15 +135,28 @@ test('offline location timeouts coalesce OS work, keep local browsing responsive
   });
   const keepAlive = setTimeout(() => {}, 2000);
   t.after(() => clearTimeout(keepAlive));
-  await assert.rejects(files.browse({ location: 'network' }), (error) => error.status === 504);
-  await assert.rejects(files.browse({ location: 'network' }), (error) => error.status === 504);
+  await assert.rejects(
+    files.read({ file: path.join(f.shared, 'Orlando', 'round.json'), refreshSeconds: 5 }),
+    (error) => error.status === 504
+  );
+  await assert.rejects(
+    files.read({ file: path.join(f.shared, 'Orlando', 'round.json'), refreshSeconds: 5 }),
+    (error) => error.status === 504
+  );
   assert.equal(calls, 1);
   files.timeoutMs = 1000;
-  assert.equal((await files.browse()).entries[0].name, 'round.json');
+  assert.equal(
+    (await files.read({ file: path.join(f.local, 'round.json'), refreshSeconds: 5 })).data,
+    'LOCAL'
+  );
   release();
   await new Promise((resolve) => setImmediate(resolve));
   files.io = fs;
-  assert.equal((await files.browse({ location: 'network' })).entries[0].name, 'Orlando');
+  assert.equal(
+    (await files.read({ file: path.join(f.shared, 'Orlando', 'round.json'), refreshSeconds: 5 }))
+      .data,
+    'SHARED'
+  );
 });
 test('saved connection and binding identity distinguish locations with identical relative filenames', async (t) => {
   const f = await fixture(t);

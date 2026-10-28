@@ -45,27 +45,17 @@ test('CSV reads quoted delimiters, doubled quotes, multiline UTF-8, empty cells 
     assert.throws(() => parseCSV(raw));
 });
 
-test('local files are bounded UTF-8 data from one server folder, never arbitrary paths', async (t) => {
+test('JSON/CSV files validate format, UTF-8, size and regular-file restrictions', async (t) => {
   const root = await folder(t),
     files = new LocalFiles(root);
   await fs.writeFile(path.join(root, 'round.json'), '\uFEFF{"round":"ROUND 1"}');
   await fs.writeFile(path.join(root, 'stories.csv'), 'Subtopic\nStory');
   await fs.writeFile(path.join(root, 'ignored.txt'), 'Not offered');
   await fs.mkdir(path.join(root, 'directory.json'));
-  assert.deepEqual(
-    (await files.list()).files.map((file) => file.name),
-    ['round.json', 'stories.csv']
-  );
   assert.deepEqual((await files.read({ file: 'round.json', refreshSeconds: 5 })).data, {
     round: 'ROUND 1'
   });
-  for (const file of [
-    '../round.json',
-    'C:\\round.json',
-    '/round.json',
-    'round.json:secret',
-    'file.txt'
-  ])
+  for (const file of ['../round.json', 'round.json:secret', 'file.txt'])
     assert.throws(() => normalizeLocalSettings({ file, refreshSeconds: 5 }, 'local-json'));
   await assert.rejects(
     files.read({ file: 'round.json', refreshSeconds: 5 }, { type: 'local-csv' }),
@@ -102,7 +92,7 @@ test('local CSV/JSON mapping refreshes committed links, retains invalid/missing 
   );
   let clock = Date.now();
   const file = path.join(f.root, 'sources.json'),
-    options = { localFiles: new LocalFiles(dataRoot), now: () => clock };
+    options = { localFiles: new LocalFiles(path.join(f.root, 'unrelated')), now: () => clock };
   const sources = new DataSources(file, f.stages, options);
   await sources.ready;
   t.after(() => sources.close());
@@ -132,7 +122,7 @@ test('local CSV/JSON mapping refreshes committed links, retains invalid/missing 
     await sources.saveConnection(
       null,
       'Round',
-      { file: 'round.json', refreshSeconds: 5 },
+      { file: jsonFile, refreshSeconds: 5 },
       0,
       'local-json'
     )
@@ -141,7 +131,7 @@ test('local CSV/JSON mapping refreshes committed links, retains invalid/missing 
     await sources.saveConnection(
       null,
       'Stories',
-      { file: 'stories.csv', refreshSeconds: 5, delimiter: ',' },
+      { file: csvFile, refreshSeconds: 5, delimiter: ',' },
       sources.snapshot().revision,
       'local-csv'
     )

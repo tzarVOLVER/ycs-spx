@@ -121,14 +121,6 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     handlers(async (req, res) => res.json(sources.localFiles.describe()))
   );
   router.post(
-    '/data/local/browse',
-    handlers(async (req, res) => res.json(await sources.localFiles.browse(req.body)))
-  );
-  router.get(
-    '/data/local/files',
-    handlers(async (req, res) => res.json(await sources.localFiles.list()))
-  );
-  router.post(
     '/data/local/test',
     handlers(async (req, res) =>
       res.json(await sources.localFiles.read(req.body.settings, { type: req.body.type }))

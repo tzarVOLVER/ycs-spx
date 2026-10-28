@@ -173,10 +173,7 @@ function settings() {
     type = $('connection-type').value;
   if (YCSSourceTypes.isLocal(type))
     return {
-      file: $('local-file').value,
-      ...($('local-location').value && $('local-location').value !== 'default'
-        ? { location: $('local-location').value }
-        : {}),
+      ...localFile.settings(),
       refreshSeconds,
       ...(type === 'local-csv' ? { delimiter: $('csv-delimiter').value } : {})
     };
@@ -209,14 +206,12 @@ function connectionType() {
   $('csv-delimiter-field').hidden = type !== 'local-csv';
   $('local-file').required = local;
   $('local-file').disabled = !local || Boolean(state.connections[editingId]?.usages.length);
-  $('local-location').disabled = !local || Boolean(state.connections[editingId]?.usages.length);
-  $('refresh-local-files').disabled = Boolean(state.connections[editingId]?.usages.length);
   $('csv-delimiter').disabled =
     type !== 'local-csv' || Boolean(state.connections[editingId]?.usages.length);
   $('sheet-url-label').hidden = local;
   $('sheet-url').disabled = local;
   $('connection-help').textContent = local
-    ? 'Choose a file from the SPX server data folder. Saving edits to that file updates committed linked graphics automatically.'
+    ? 'Paste the full path to a JSON or CSV file accessible to the SPX computer. Test it, then save. Changes to the file refresh linked graphics automatically.'
     : json
       ? 'Connect a read-only public HTTPS JSON API. Optional Bearer credentials stay in the server environment.'
       : 'Use a sheet shared with Anyone with the link as Viewer. No sign-in or API key.';
@@ -255,9 +250,9 @@ function openConnection(id = null) {
     enabled: !connection || connection.type === 'google-sheets'
   });
   connectionType();
-  localPicker.reset({
+  localFile.reset({
     file: connection?.settings.file || '',
-    location: connection?.settings.location || 'default',
+    location: connection?.settings.location,
     locked: Boolean(connection?.usages.length)
   });
   $('sheet-label').focus();
@@ -269,15 +264,11 @@ function invalidateSheetTest() {
   $('save-sheet').disabled = true;
   $('sheet-test-status').textContent = 'Test the updated settings before saving.';
 }
-const localPicker = new window.YCSLocalFilePicker({
-  request,
-  invalidate: invalidateSheetTest,
-  getType: () => $('connection-type').value
-});
+const localFile = new window.YCSLocalFileField({ request });
 const sheetPicker = new window.YCSSheetPicker({ request, invalidate: invalidateSheetTest });
 $('connection-type').onchange = () => {
   connectionType();
-  localPicker.reset();
+  localFile.reset();
   invalidateSheetTest();
 };
 $('connection-project').onchange = invalidateSheetTest;
@@ -420,7 +411,7 @@ window.addEventListener(
   () => {
     disposed = true;
     sheetPicker.dispose();
-    localPicker.dispose();
+    localFile.dispose();
     workspace.dispose();
     clearInterval(timer);
   },

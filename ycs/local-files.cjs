@@ -12,7 +12,7 @@ function fail(message, status = 400) {
 }
 function localFileType(name) {
   if (typeof name !== 'string' || !/^[^<>:"/\\|?*\u0000-\u001f]{1,180}\.(json|csv)$/i.test(name))
-    fail('Choose a JSON or CSV filename from the SPX data folder');
+    fail('Enter the path to a JSON or CSV file');
   return name.toLowerCase().endsWith('.json') ? 'local-json' : 'local-csv';
 }
 function relativePath(value, { directory = false } = {}) {
@@ -42,10 +42,29 @@ function locationId(value = 'default') {
     fail('Choose a configured server location');
   return value;
 }
+function filePath(input) {
+  if (typeof input !== 'string') fail('Enter the path to a JSON or CSV file');
+  let value = input.trim();
+  if (/^(["']).*\1$/.test(value)) value = value.slice(1, -1);
+  if (!value || value.length > 4096 || /^[\\/]{2}[?.][\\/]/.test(value))
+    fail('Use a regular file path, not a Windows device path');
+  if (!path.isAbsolute(value)) return relativePath(value);
+  if (
+    process.platform === 'win32' &&
+    !/^(?:[a-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+[\\/])/i.test(value)
+  )
+    fail('Use a full drive path or a network share path');
+  const root = path.parse(value).root;
+  if (/^[\\/]{2}/.test(root)) relativePath(root.replace(/^[\\/]+|[\\/]+$/g, ''));
+  relativePath(value.slice(root.length));
+  return path.normalize(value);
+}
 function normalizeLocalSettings(input, type) {
-  const file = relativePath(input?.file);
-  if (localFileType(file.split('/').pop()) !== type)
+  const file = filePath(input?.file);
+  if (localFileType(path.basename(file)) !== type)
     fail('The selected file does not match the source type');
+  if (path.isAbsolute(file) && input.location !== undefined)
+    fail('A full file path does not need a server location');
   const location = locationId(input.location),
     refreshSeconds = Number(input.refreshSeconds);
   if (!Number.isInteger(refreshSeconds) || refreshSeconds < 5 || refreshSeconds > 3600)
@@ -214,78 +233,21 @@ class LocalFiles {
     signal.throwIfAborted();
     return { root, folder: resolved };
   }
-  async browse({ location = 'default', directory = '', type } = {}, options = {}) {
-    const selected = this.location(location),
-      relative = relativePath(directory, { directory: true });
-    if (type !== undefined && !['local-json', 'local-csv'].includes(type))
-      fail('Choose a JSON or CSV source type');
-    return this.bounded(
-      'browse:' + selected.id + ':' + relative + ':' + (type || ''),
-      async (signal) => {
-        try {
-          const { folder } = await this.directory(selected, relative, signal),
-            items = await this.io.readdir(folder, { withFileTypes: true });
-          signal.throwIfAborted();
-          if (items.length > 10000)
-            fail('This folder is too large to browse; enter a narrower folder path');
-          const entries = [];
-          for (const entry of items) {
-            if (entry.isSymbolicLink()) continue;
-            const file = relative ? relative + '/' + entry.name : entry.name;
-            try {
-              relativePath(file);
-              if (entry.isDirectory())
-                entries.push({ name: entry.name, path: file, kind: 'directory' });
-              else if (entry.isFile()) {
-                const fileType = localFileType(entry.name);
-                if (!type || fileType === type)
-                  entries.push({ name: entry.name, path: file, kind: 'file', type: fileType });
-              }
-            } catch {
-              /* Unsupported names and non-data files are omitted. */
-            }
-          }
-          entries.sort(
-            (a, b) =>
-              (a.kind === b.kind ? 0 : a.kind === 'directory' ? -1 : 1) ||
-              a.name.localeCompare(b.name)
-          );
-          return {
-            location: selected.id,
-            label: selected.label,
-            root: selected.path,
-            directory: relative,
-            folder,
-            entries: entries.slice(0, 500),
-            truncated: entries.length > 500
-          };
-        } catch (error) {
-          if (error.status || signal.aborted) throw error;
-          fail(
-            'Server folder is unavailable; check its path, network and Windows access permissions',
-            422
-          );
-        }
-      },
-      options
-    );
-  }
-  async list() {
-    const result = await this.browse();
-    return {
-      folder: this.root,
-      files: result.entries
-        .filter((entry) => entry.kind === 'file')
-        .map((entry) => ({ name: entry.name, type: entry.type }))
-    };
-  }
   async read(input, { signal, type } = {}) {
-    type ||= localFileType(relativePath(input?.file).split('/').pop());
+    type ||= localFileType(path.basename(filePath(input?.file)));
     const settings = normalizeLocalSettings(input, type),
-      location = this.location(settings.location);
+      location = path.isAbsolute(settings.file)
+        ? { id: 'absolute', path: path.dirname(settings.file) }
+        : this.location(settings.location);
+    const readSettings = path.isAbsolute(settings.file)
+      ? { ...settings, file: path.basename(settings.file) }
+      : settings;
     return this.bounded(
       'read:' + location.id + ':' + JSON.stringify(settings),
-      (signal) => this.readFile(settings, type, location, signal),
+      async (signal) => ({
+        ...(await this.readFile(readSettings, type, location, signal)),
+        settings
+      }),
       { signal }
     );
   }
@@ -361,5 +323,6 @@ module.exports = {
   localFileType,
   MAX_BYTES,
   TABLE_RANGE,
-  relativePath
+  relativePath,
+  filePath
 };

@@ -74,12 +74,7 @@ async function setup(t, { apiKey } = {}) {
 test('local file HTTP routes enforce origin and path validation, test without saving and accept mapped CSV/JSON sources', async (t) => {
   const r = await setup(t),
     before = await fs.readFile(path.join(r.root, 'sources.json'), 'utf8');
-  const files = await fetch(r.base + '/api/ycs/data/local/files').then((response) =>
-    response.json()
-  );
-  assert.equal(files.files.length, 2);
-  assert.equal(files.folder, r.localRoot);
-  const settings = { file: 'round.json', refreshSeconds: 5 };
+  const settings = { file: path.join(r.localRoot, 'round.json'), refreshSeconds: 5 };
   assert.equal(
     (
       await r.post(
@@ -139,7 +134,7 @@ test('local file HTTP routes enforce origin and path validation, test without sa
   assert.equal(r.playback.snapshot('stage-1', 'program').graphics.length, 0);
 });
 
-test('Data Manager selects server files, tests/saves both formats and exposes existing mapping without playout', async (t) => {
+test('Data Manager accepts full server paths, tests/saves both formats and exposes existing mapping without playout', async (t) => {
   const r = await setup(t),
     dom = new JSDOM(
       await fs.readFile(path.join(__dirname, '../public/data-manager.html'), 'utf8'),
@@ -179,12 +174,12 @@ test('Data Manager selects server files, tests/saves both formats and exposes ex
     };
   $('add-connection').click();
   change('connection-type', 'local-json');
-  await until(() => $('local-file-status').textContent.startsWith('SPX server location:'));
-  assert.match($('local-file-status').textContent, /SPX server location/);
-  assert.equal($('local-location').value, 'default');
+  assert.match($('local-file-status').textContent, /SPX computer/);
+  assert.equal($('file-browser-dialog'), null);
+  assert.equal($('local-location'), null);
   assert.equal($('sheet-url').disabled, true);
   $('sheet-label').value = 'Local round';
-  change('local-file', 'round.json');
+  change('local-file', path.join(r.localRoot, 'round.json'));
   await $('test-sheet').onclick();
   assert.equal($('save-sheet').disabled, false);
   assert.match($('sheet-preview').textContent, /<b>ROUND 1<\/b>/);
@@ -196,11 +191,10 @@ test('Data Manager selects server files, tests/saves both formats and exposes ex
   assert.equal($('connection-dialog').open, false);
   $('add-connection').click();
   change('connection-type', 'local-csv');
-  await until(() => $('local-file-status').textContent.startsWith('SPX server location:'));
   assert.equal($('local-file').tagName, 'INPUT');
   assert.equal($('csv-delimiter-field').hidden, false);
   $('sheet-label').value = 'Local stories';
-  change('local-file', 'stories.csv');
+  change('local-file', path.join(r.localRoot, 'stories.csv'));
   change('csv-delimiter', ';');
   await $('test-sheet').onclick();
   assert.match($('sheet-preview').textContent, /CSV story/);
@@ -227,66 +221,29 @@ test('Data Manager selects server files, tests/saves both formats and exposes ex
   );
 });
 
-test('configured server browser routes enforce access and path boundaries without changing connections or program', async (t) => {
-  const r = await setup(t),
-    before = await fs.readFile(path.join(r.root, 'sources.json'), 'utf8');
-  const locations = await fetch(r.base + '/api/ycs/data/local/locations').then((response) =>
-    response.json()
-  );
-  assert.deepEqual(
-    locations.locations.map((location) => location.id),
-    ['default', 'production']
-  );
-  const root = await r.post('/data/local/browse', {
-    location: 'production',
-    directory: '',
-    type: 'local-json'
-  });
-  assert.equal(root.status, 200);
-  assert.equal((await root.json()).entries[0].name, 'Orlando');
-  const folder = await (
-    await r.post('/data/local/browse', {
-      location: 'production',
-      directory: 'Orlando',
-      type: 'local-json'
-    })
-  ).json();
-  assert.equal(folder.entries[0].path, 'Orlando/round.json');
-  for (const body of [
-    { location: 'unknown' },
-    { directory: '../outside' },
-    { directory: 'C:/outside' },
-    { directory: '\\\\OTHER\\share' },
-    { directory: 'Orlando', type: 'text' }
-  ])
-    assert.equal((await r.post('/data/local/browse', body)).status, 400);
+test('file path endpoints require existing API authorization and keep legacy locations readable', async (t) => {
+  const r = await setup(t, { apiKey: 'path-test-key' });
+  const body = {
+    type: 'local-json',
+    settings: { file: path.join(r.localRoot, 'round.json'), refreshSeconds: 5 }
+  };
+  assert.equal((await fetch(r.base + '/api/ycs/data/local/locations')).status, 401);
+  assert.equal((await r.post('/data/local/test', body)).status, 401);
   assert.equal(
-    (
-      await r.post(
-        '/data/local/browse',
-        { location: 'production' },
-        { Origin: 'https://untrusted.example' }
-      )
-    ).status,
-    403
+    (await r.post('/data/local/test', body, { Authorization: 'Bearer path-test-key' })).status,
+    200
   );
-  assert.equal(await fs.readFile(path.join(r.root, 'sources.json'), 'utf8'), before);
-  assert.equal(r.playback.snapshot('stage-1', 'program').graphics.length, 0);
-  const tested = await (
-    await r.post('/data/local/test', {
+  const legacy = await r.post(
+    '/data/local/test',
+    {
       type: 'local-json',
       settings: { location: 'production', file: 'Orlando/round.json', refreshSeconds: 5 }
-    })
-  ).json();
-  assert.equal(tested.data.round, 'SHARED ROUND');
-});
-
-test('server location metadata and browser require the existing API authorization', async (t) => {
-  const r = await setup(t, { apiKey: 'browser-test-key' });
-  assert.equal((await fetch(r.base + '/api/ycs/data/local/locations')).status, 401);
-  assert.equal((await r.post('/data/local/browse', {})).status, 401);
+    },
+    { Authorization: 'Bearer path-test-key' }
+  );
+  assert.equal((await legacy.json()).data.round, 'SHARED ROUND');
   assert.equal(
-    (await r.post('/data/local/browse', {}, { Authorization: 'Bearer browser-test-key' })).status,
-    200
+    (await r.post('/data/local/browse', {}, { Authorization: 'Bearer path-test-key' })).status,
+    404
   );
 });
