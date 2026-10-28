@@ -18,10 +18,24 @@ if (stage) {
   async function request(url, body) {
     const response = await fetch(url, body === undefined ? { cache: 'no-store' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || 'Stage request failed');
+    if (!response.ok) { const error = new Error(payload.error || 'Stage request failed'); error.fields = payload.fields; throw error; }
     return payload;
   }
   function notify(text, error = false) { message.textContent = text; message.classList.toggle('ycs-error', error); }
+  function fieldErrors(row, errors = {}) {
+    for (const input of row.querySelectorAll('[data-update]')) {
+      const id = `ycs-error-${row.dataset.spxEpoch}-${input.dataset.update}`;
+      row.querySelectorAll('.ycs-field-error').forEach(element => { if (element.id === id) element.remove(); });
+      const descriptions = (input.getAttribute('aria-describedby') || '').split(/\s+/).filter(value => value && value !== id);
+      input.removeAttribute('aria-invalid');
+      if (errors[input.dataset.update]) {
+        const detail = document.createElement('small'); detail.id = id; detail.className = 'ycs-field-error'; detail.textContent = errors[input.dataset.update]; detail.setAttribute('role', 'status');
+        (input.closest('.ycs-link-field') || input).after(detail);
+        input.setAttribute('aria-invalid', 'true'); descriptions.push(id);
+      }
+      if (descriptions.length) input.setAttribute('aria-describedby', descriptions.join(' ')); else input.removeAttribute('aria-describedby');
+    }
+  }
   function fields(row) {
     return [...row.querySelectorAll('[data-update]')].map(input => ({ field: input.dataset.update, value: input.type === 'checkbox' ? (input.checked ? '1' : '0') : input.value }));
   }
@@ -55,7 +69,7 @@ if (stage) {
       const source = sourceState?.sources[link.source], linked = link.mode === 'linked';
       let incompatible=false;
       if(source?.value!==undefined){try{link.lastValue=editorValue(input,source.value);}catch{incompatible=true;}}
-      const value = source?.value ?? link.lastValue ?? link.manual, changed = linked && manualValue(input) !== value;
+      const value = link.lastValue ?? link.manual, changed = linked && manualValue(input) !== value;
       if (linked) showValue(input,value);
       input.readOnly = linked; if(input.type==='checkbox'||input.tagName==='SELECT')input.disabled=linked; input.classList.toggle('ycs-linked-input', linked);
       button.setAttribute('aria-pressed', String(linked)); button.setAttribute('aria-label', linked ? 'Use manual ' + title : 'Link ' + title + ' to data source');
@@ -144,6 +158,7 @@ if (stage) {
         fields: fields(row), links: Object.fromEntries(Object.entries(model.links).map(([field, link]) => [field, { mode: link.mode, manual: link.manual }])), revision: model.revision
       };
       const result = await request(`/api/ycs/stages/${stage}/graphics/${encodeURIComponent(row.dataset.spxEpoch)}/${action}`, body);
+      if (!['stop', 'continue'].includes(action)) fieldErrors(row);
       if (action !== 'preview') {
         if (['play', 'update', 'save'].includes(action)) model.revision = result.editorRevision;
         notify(action === 'save' ? 'Saved. Program unchanged.' : `${row.dataset.spxEpoch}: ${action}`);
@@ -156,7 +171,7 @@ if (stage) {
       }
       return result;
     });
-    model.queue = operation.catch(error => notify(error.message, true));
+    model.queue = operation.catch(error => { fieldErrors(row, error.fields); notify(error.message, true); });
     return model.queue;
   }
   function schedulePreview(row) { clearTimeout(timers.get(row)); timers.set(row, setTimeout(() => send(row, 'preview'), 300)); }

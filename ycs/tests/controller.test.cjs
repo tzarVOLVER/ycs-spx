@@ -18,7 +18,7 @@ async function controller(t, compact = false) {
     const cell=expanded.querySelector('td[width="65%"]');cell.append(row.querySelector('[data-update="f0"]'),originalRound);
     for(const [field,type,value]of [['f2','checkbox','1'],['f8','number','145'],['f14','textarea','[]']]){const input=window.document.createElement(type==='textarea'?'textarea':'input');if(type!=='textarea')input.type=type;input.dataset.update=field;input.name=`RundownItem[${field}]`;input.value=value;input.checked=type==='checkbox';input.className='gcinput';cell.append(input);}
   }
-  let revision = 0, closed = 0;
+  let revision = 0, closed = 0, validationError;
   window.setMasterButtonStates = () => {};
   window.getFocusedRow = () => row;
   window.ToggleExpand = () => { closed++; row.querySelector('#Expanded').style.display = 'none'; };
@@ -27,6 +27,7 @@ async function controller(t, compact = false) {
     let payload;
     if (request?.method === 'POST') {
       const body = JSON.parse(request.body); posts.push({ url, body });
+      if(validationError)return {ok:false,json:async()=>({error:'Current round: Value exceeds 300 characters',fields:validationError})};
       const action = url.split('/').at(-1);
       payload = { editorRevision: action === 'stop' ? 99 : action === 'preview' ? revision : ++revision };
     } else if (url.endsWith('/editor')) payload = { revision, links: { f5: { mode: 'manual', manual: 'MANUAL ROUND' },...(compact?{f2:{mode:'manual',manual:'1'}}:{}) }, fields: compact?[{field:'f0',ftype:'hidden',title:'Identity'},{field:'f2',ftype:'checkbox',title:'Show rounds remaining'},{field:'f5',ftype:'textfield',title:'Current round'},{field:'f8',ftype:'number',title:'Crawl speed'},{field:'f14',ftype:'textarea',title:'Stories',ycsCollection:{version:1,fields:[{key:'subtopic'}]}}]:[] };
@@ -39,7 +40,7 @@ async function controller(t, compact = false) {
   t.after(() => { window.dispatchEvent(new window.Event('pagehide')); window.close(); });
   for (let index = 0; index < 10; index++) await new Promise(resolve => setImmediate(resolve));
   const program = graphics => channels.get('state')({ stage: 'stage-1', mode: 'program', graphics });
-  return { window, row, posts, program, originalRound, closed: () => closed };
+  return { window, row, posts, program, originalRound, closed: () => closed, rejectFields: errors => { validationError=errors; } };
 }
 
 test('native chain previews without Play and program state enables Update and protects active rows', async t => {
@@ -57,6 +58,16 @@ test('native chain previews without Play and program state enables Update and pr
   assert.equal(r.row.querySelector('[data-spx-name="deletelarge"]').style.visibility, 'hidden');
   r.program([]);
   assert.equal(r.row.querySelector('[data-spx-name="updatebutton"]').classList.contains('disabled'), true);
+});
+
+test('field validation errors appear beside their input and clear after a successful correction',async t=>{
+ const r=await controller(t),input=r.row.querySelector('[data-update="f5"]');
+ r.rejectFields({f5:'Value exceeds 300 characters'});await r.window.updateItem(r.row);
+ assert.equal(input.getAttribute('aria-invalid'),'true');assert.equal(r.row.querySelector('.ycs-field-error').textContent,'Value exceeds 300 characters');
+ assert.ok(input.getAttribute('aria-describedby').includes(r.row.querySelector('.ycs-field-error').id));
+ assert.equal(r.closed(),0);
+ r.rejectFields(null);await r.window.previewItem(r.row);
+ assert.equal(input.hasAttribute('aria-invalid'),false);assert.equal(r.row.querySelector('.ycs-field-error'),null);
 });
 
 test('native Save closes the editor; Stop does not silently refresh a stale editing revision', async t => {

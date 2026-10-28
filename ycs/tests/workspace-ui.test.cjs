@@ -42,3 +42,41 @@ test('known local saves advance compatible draft revisions without discarding ot
  r.workspace.acceptRevision(1,2);assert.equal(first.revision,2);assert.equal(second.revision,2);assert.equal(first.edits.size,1);assert.equal(second.edits.size,1);
  first.revision=1;r.workspace.acceptRevision(2,3);assert.equal(first.revision,1);assert.equal(second.revision,3);
 });
+
+test('stage navigation blocks edits and Save while loading, preserves the old draft and ignores late stage responses',async t=>{
+ const r=await fixture(t),workspace=r.workspace,request=workspace.request;
+ workspace.assign({static:'Stage A draft'});const first=workspace.model;
+ let release;workspace.request=(url,body)=>url==='/stages/b/graphics'?new Promise(resolve=>release=resolve):request(url,body);
+ r.$('mapping-project').value='ShowB';const navigation=workspace.selectProject();
+ assert.equal(workspace.model,null);assert.equal(r.$('save-mappings').disabled,true);assert.equal(r.$('mappings-view').getAttribute('aria-busy'),'true');
+ workspace.assign({static:'Wrong stage'});await workspace.save();await workspace.preview();
+ assert.equal(r.posts.filter(post=>post.url.startsWith('/data/mappings/')&&!post.url.endsWith('/preview')).length,0);assert.equal(first.edits.get('f0').binding.static,'Stage A draft');
+ r.$('mapping-project').value='ShowA';await workspace.selectProject();
+ assert.equal(workspace.model,first);assert.equal(workspace.current(),true);
+ release([{id:'guest',title:'Late stage B',fields:[]}]);await navigation;
+ assert.equal(workspace.stage,'a');assert.equal(workspace.model,first);assert.notEqual(r.$('mapping-title').textContent,'Late stage B');
+});
+
+test('graphic navigation blocks old-model saves, ignores stale same-target loads and recovers from a failed load',async t=>{
+ const r=await fixture(t),workspace=r.workspace,request=workspace.request;workspace.assign({static:'Original draft'});
+ const pending=[];workspace.request=(url,body)=>!body&&url==='/data/mappings/a/other'?new Promise((resolve,reject)=>pending.push({resolve,reject})):request(url,body);
+ r.$('mapping-graphic').value='other';const first=workspace.selectGraphic();
+ await workspace.save();assert.equal(r.posts.filter(post=>post.url.startsWith('/data/mappings/')&&!post.url.endsWith('/preview')).length,0);
+ r.$('mapping-graphic').value='guest';await workspace.selectGraphic();assert.equal(workspace.model.edits.size,1);
+ r.$('mapping-graphic').value='other';const second=workspace.selectGraphic();
+ pending[1].resolve({title:'Newest other',revision:1,template:'/test.html',fields:[]});await second;
+ pending[0].resolve({title:'Obsolete other',revision:1,template:'/test.html',fields:[]});await first;
+ assert.equal(r.$('mapping-title').textContent,'Newest other');
+ const failed=workspace.selectGraphic(true);pending[2].reject(new Error('Read failed'));await failed;
+ assert.equal(workspace.model,null);assert.equal(r.$('save-mappings').disabled,true);assert.equal(r.$('mappings-view').getAttribute('aria-busy'),'false');
+ r.$('mapping-graphic').value='guest';await workspace.selectGraphic();assert.equal(workspace.model.edits.get('f0').binding.static,'Original draft');
+});
+
+test('an in-flight save stays bound to its original identity and cannot reload a subsequently selected graphic',async t=>{
+ const r=await fixture(t),workspace=r.workspace,request=workspace.request;workspace.assign({static:'Guest draft'});
+ let release;workspace.request=(url,body)=>body&&url==='/data/mappings/a/guest'?new Promise(resolve=>{release=resolve;r.posts.push({url,body:structuredClone(body)});}):request(url,body);
+ const saving=workspace.save();r.$('mapping-graphic').value='other';await workspace.selectGraphic();const other=workspace.model;
+ release({revision:2});await saving;
+ const saved=r.posts.find(post=>post.url==='/data/mappings/a/guest');assert.equal(saved.body.edits[0].binding.static,'Guest draft');
+ assert.equal(workspace.model,other);assert.equal(workspace.model.graphic,'other');assert.equal(r.$('mappings-view').inert,false);
+});

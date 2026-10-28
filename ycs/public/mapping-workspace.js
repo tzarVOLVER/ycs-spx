@@ -28,16 +28,61 @@ window.YCSMappingWorkspace=class MappingWorkspace {
     this.$('mapping-stage').replaceChildren();for(const stage of this.stages.filter(item=>(item.project||item.id)===this.$('mapping-project').value))this.option(this.$('mapping-stage'),stage.id,(stage.rundown||stage.title)+' · '+stage.title);
     if(typeof preferred==='string')this.$('mapping-stage').value=preferred;await this.selectStage();
   }
-  async selectStage(){try{this.stage=this.$('mapping-stage').value;const stage=this.stage;const graphics=await this.request(`/stages/${stage}/graphics`);if(stage!==this.stage)return;this.graphics=graphics;this.$('mapping-graphic').replaceChildren();for(const graphic of graphics)this.option(this.$('mapping-graphic'),graphic.id,graphic.title);const requested=new URLSearchParams(location.search).get('graphic');if(graphics.some(item=>item.id===requested))this.$('mapping-graphic').value=requested;this.renderGraphics();await this.selectGraphic();}catch(error){this.message(error.message,true);}}
+  beginSelection() {
+    const sequence = this.selectionSequence = (this.selectionSequence || 0) + 1;
+    this.previewSequence++;
+    clearTimeout(this.previewTimer);
+    this.endDrag();
+    this.model = null;
+    this.previewData = null;
+    this.loading = true;
+    this.$('mapping-fields').replaceChildren();
+    this.$('mapping-title').textContent = 'Loading graphic…';
+    this.setBusy(true);
+    this.status();
+    return sequence;
+  }
+  setBusy(busy) {
+    this.$('mappings-view').setAttribute('aria-busy', String(busy));
+    for (const selector of ['.mapping-editor', '.data-panel']) this.$('mappings-view').querySelector(selector).inert = busy;
+    this.$('reload-mappings').disabled = busy;
+  }
+  current(model = this.model) {
+    return Boolean(model && !this.loading && model === this.model && model.stage === this.stage && model.graphic === this.$('mapping-graphic').value);
+  }
+  async selectStage() {
+    const sequence = this.beginSelection(), stage = this.$('mapping-stage').value;
+    this.stage = stage;
+    this.graphics = [];
+    this.$('mapping-graphic').replaceChildren();
+    this.renderGraphics();
+    try {
+      const graphics = await this.request(`/stages/${stage}/graphics`);
+      if (sequence !== this.selectionSequence) return;
+      this.graphics = graphics;
+      for (const graphic of graphics) this.option(this.$('mapping-graphic'), graphic.id, graphic.title);
+      const requested = new URLSearchParams(location.search).get('graphic');
+      if (graphics.some(item => item.id === requested)) this.$('mapping-graphic').value = requested;
+      this.renderGraphics();
+      await this.selectGraphic();
+    } catch (error) {
+      if (sequence === this.selectionSequence) {
+        this.loading = false; this.setBusy(false); this.status();
+        this.$('mapping-title').textContent = 'Could not load rundown'; this.message(error.message, true);
+      }
+    }
+  }
   key(){return this.stage+'\0'+this.$('mapping-graphic').value;}
   async selectGraphic(revert=false){
-    const graphic=this.$('mapping-graphic').value,stage=this.stage,key=this.key();this.previewSequence++;
-    if(!graphic){this.model=null;this.$('mapping-fields').replaceChildren();this.$('mapping-title').textContent='No graphics in this rundown';return;}
+    const graphic=this.$('mapping-graphic').value,stage=this.stage,key=this.key(),sequence=this.beginSelection();
+    if(!graphic){this.loading=false;this.setBusy(false);this.status();this.$('mapping-title').textContent='No graphics in this rundown';return;}
     try{
-      let model=this.models.get(key);if(!model||revert){const data=await this.request(`/data/mappings/${stage}/${encodeURIComponent(graphic)}`);if(stage!==this.stage||graphic!==this.$('mapping-graphic').value)return;model={...data,edits:new Map(),version:0};this.models.set(key,model);}
+      let model=this.models.get(key);if(!model||revert){const data=await this.request(`/data/mappings/${stage}/${encodeURIComponent(graphic)}`);if(sequence!==this.selectionSequence)return;model={...data,stage,graphic,edits:new Map(),version:0};this.models.set(key,model);}
+      if(sequence!==this.selectionSequence)return;
+      this.loading=false;this.setBusy(false);
       this.model=model;this.previewData=null;this.$('preview-error').textContent='';this.selectedField=model.fields.find(field=>field.ftype==='textfield')?.field||model.fields[0]?.field||null;this.$('mapping-title').textContent=model.title||this.graphics.find(item=>item.id===graphic)?.title;this.$('mapping-path').textContent=model.template;
       this.renderSources();this.renderFields();this.renderGraphics();this.renderSourceContext();this.renderSourceValues();this.status();this.schedulePreview();this.fitPreview();
-    }catch(error){this.message(error.message,true);}
+    }catch(error){if(sequence===this.selectionSequence){this.loading=false;this.setBusy(false);this.status();this.$('mapping-title').textContent='Could not load graphic';this.message(error.message,true);}}
   }
   project(){return this.stages.find(item=>item.id===this.stage)?.project;}
   connection(){return this.getState()?.connections[this.sourceId];}
@@ -97,19 +142,32 @@ window.YCSMappingWorkspace=class MappingWorkspace {
     }this.paintPreview();
   }
   renderCollectionField(row,field,binding){const source=this.node('td'),configure=this.node('button',binding?'Edit story mapping':'Map story list');configure.type='button';configure.setAttribute('aria-label','Map '+field.title);configure.onclick=()=>this.collectionEditor?.open(field);source.append(configure);if(binding){source.append(this.node('small',this.sourceLabel(binding)));const clear=this.node('button','Unmap');clear.type='button';clear.onclick=()=>{this.selectedField=field.field;this.assign(null);};source.append(clear);}row.append(source,this.node('td','Per-story fields'));const preview=this.node('td');preview.dataset.preview=field.field;row.append(preview);}
-  assign(binding){if(!this.model||!this.selectedField)return;if(binding!==null&&(typeof binding!=='object'||Array.isArray(binding)))return this.message('Choose a source value.',true);const field=this.model.fields.find(field=>field.field===this.selectedField),previous=this.binding(field);if(field?.ycsCollection&&binding&&binding.selection?.kind!=='collection'){this.message('Use Map story list to select a range or JSON array.',true);return;}if(binding&&!Object.hasOwn(binding,'transform')&&previous?.transform)binding={...binding,transform:previous.transform};this.model.edits.set(this.selectedField,{field:this.selectedField,scope:this.$('mapping-scope').value,binding});this.changed();}
+  assign(binding){if(!this.current()||!this.selectedField)return;if(binding!==null&&(typeof binding!=='object'||Array.isArray(binding)))return this.message('Choose a source value.',true);const field=this.model.fields.find(field=>field.field===this.selectedField),previous=this.binding(field);if(field?.ycsCollection&&binding&&binding.selection?.kind!=='collection'){this.message('Use Map story list to select a range or JSON array.',true);return;}if(binding&&!Object.hasOwn(binding,'transform')&&previous?.transform)binding={...binding,transform:previous.transform};this.model.edits.set(this.selectedField,{field:this.selectedField,scope:this.$('mapping-scope').value,binding});this.changed();}
   changed(render=true){this.model.version++;this.status();if(render){this.renderFields();this.renderSourceValues();}this.renderGraphics();this.schedulePreview();}
-  status(){const changed=Boolean(this.model?.edits.size);this.$('save-mappings').disabled=!changed;this.$('mapping-status').textContent=changed?'Unsaved mapping · Program unchanged':'Mapping saved · Program unchanged';}
+  status(){const changed=Boolean(this.model?.edits.size);this.$('save-mappings').disabled=this.loading||!changed;this.$('mapping-status').textContent=this.loading?'Loading selection…':!this.model?'Select a graphic.':changed?'Unsaved mapping · Program unchanged':'Mapping saved · Program unchanged';}
   autoMap(){if(!this.model)return;const normal=text=>String(text).toLowerCase().replace(/[^a-z0-9]/g,'');const leaves=this.leaves();let count=0;for(const field of this.model.fields){if(field.ycsCollection||this.binding(field))continue;const matches=leaves.filter(leaf=>[normal(field.title),normal(field.field)].includes(normal(leaf.name))&&leaf.value!==null&&leaf.value!==undefined);if(matches.length===1){this.model.edits.set(field.field,{field:field.field,scope:this.$('mapping-scope').value,binding:matches[0].binding});count++;}}if(count)this.changed();this.message(count?`${count} exact name match${count===1?'':'es'} added to the draft.`:'No unique name matches. Choose cells/properties directly, or enable table-row browsing.');}
   openCells(){if(this.model?.fields.find(field=>field.field===this.selectedField)?.ycsCollection){this.collectionEditor?.open(this.model.fields.find(field=>field.field===this.selectedField));return;}const connection=this.connection();if(!connection||connection.type!=='google-sheets'||!this.model)return;const field=this.model.fields.find(field=>field.field===this.selectedField);this.$('cell-help').textContent='Choose a cell for '+field.title+'. Empty cells may be linked before data arrives.';const target=this.$('mapping-cell-grid');target.replaceChildren();const table=this.node('table');for(const cells of connection.rows||[]){const tr=this.node('tr');for(const cell of cells){const td=this.node('td'),button=this.node('button');button.type='button';button.append(this.node('code',cell.address),this.node('span',cell.value||'Empty'));button.setAttribute('aria-label',cell.address+': '+(cell.value||'empty'));button.onclick=()=>{this.assign({connection:this.sourceId,selection:{kind:'cell',cell:cell.address}});this.$('cell-dialog').close();};td.append(button);tr.append(td);}table.append(tr);}target.append(table);this.$('cell-dialog').showModal();}
   openLookup(){if(this.model?.fields.find(field=>field.field===this.selectedField)?.ycsCollection){this.message('Use Map story list for collection fields.');return;}if(!this.connection()||this.connection().type!=='google-sheets'){this.message('Choose a Google Sheets source for row lookup.');return;}const field=this.model.fields.find(field=>field.field===this.selectedField),pick=this.binding(field)?.selection||{};this.$('lookup-header').value=pick.headerRow||1;this.$('lookup-key').value=pick.keyColumn||'';this.$('lookup-match').value=pick.keyValue||'';this.$('lookup-value').value=pick.valueColumn||'';this.$('lookup-dialog').showModal();}
   schedulePreview(){clearTimeout(this.previewTimer);this.previewTimer=setTimeout(()=>this.preview(),180);}
-  async preview(){if(!this.model||!this.stage)return;const model=this.model,sequence=++this.previewSequence,stage=this.stage,graphic=this.$('mapping-graphic').value;try{const result=await this.request(`/data/mappings/${stage}/${encodeURIComponent(graphic)}/preview`,{edits:[...model.edits.values()]});if(sequence!==this.previewSequence||model!==this.model)return;this.previewData=result;this.paintPreview();this.$('mapping-preview').contentWindow.postMessage({type:'ycs-mapping-preview',graphic:result.graphic},location.origin);}catch(error){if(sequence===this.previewSequence)this.$('preview-error').textContent=error.message;}}
+  async preview(){if(!this.current())return;const model=this.model,sequence=++this.previewSequence,{stage,graphic}=model;try{const result=await this.request(`/data/mappings/${stage}/${encodeURIComponent(graphic)}/preview`,{edits:[...model.edits.values()]});if(sequence!==this.previewSequence||!this.current(model))return;this.previewData=result;this.paintPreview();this.$('mapping-preview').contentWindow.postMessage({type:'ycs-mapping-preview',graphic:result.graphic},location.origin);}catch(error){if(sequence===this.previewSequence&&this.current(model))this.$('preview-error').textContent=error.message;}}
   paintPreview(){if(!this.model)return;const data=this.previewData;if(data?.template!==this.model.template)return;for(const field of data.fields||[]){const target=this.$('mapping-fields').querySelector(`[data-preview="${field.field}"]`);if(!target)continue;let display=field.value;if(field.ycsCollection){try{display=JSON.parse(field.value).length+' stories';}catch{display='Manual story list';}}target.replaceChildren(this.node('span',display));if(field.error)target.append(this.node('small',field.error,'warning'));else if(field.required&&!field.value)target.append(this.node('small','Required · no value','warning'));target.closest('tr').classList.toggle('field-warning',Boolean(field.error)||field.required&&!field.value);}
     const graphic=this.graphics.find(item=>item.id===this.$('mapping-graphic').value),mapped=this.model.fields.filter(field=>this.binding(field)).length,summary=this.$('graphic-summary');summary.replaceChildren();for(const [title,value]of [['Rundown item',graphic?.title||''],['Display slot',graphic?.slot||''],['Fields mapped',mapped+' of '+this.model.fields.length],['Preview','Mapping draft only · no playout']])summary.append(this.node('dt',title),this.node('dd',value));}
-  async save(){if(!this.model?.edits.size)return;const model=this.model,body={revision:model.revision,edits:structuredClone([...model.edits.values()])};this.$('mappings-view').inert=true;try{const data=await this.request(`/data/mappings/${this.stage}/${encodeURIComponent(this.$('mapping-graphic').value)}`,body);this.acceptRevision(body.revision,data.revision);this.onSaved(data);await this.selectGraphic(true);this.message('Mapping saved. Enable its field links in the rundown, then Preview / Play / Update as needed.');}catch(error){this.message(error.message,true);}finally{this.$('mappings-view').inert=false;}}
+  async save(){
+    if(!this.current()||!this.model.edits.size||this.saving)return;
+    const model=this.model,{stage,graphic}=model,version=model.version;
+    const body={revision:model.revision,edits:structuredClone([...model.edits.values()])};
+    this.saving=true;this.$('mappings-view').inert=true;
+    try{
+      const data=await this.request(`/data/mappings/${stage}/${encodeURIComponent(graphic)}`,body);
+      this.acceptRevision(body.revision,data.revision);this.onSaved(data);
+      if(this.current(model)&&model.version===version)await this.selectGraphic(true);
+      else if(model.version===version)this.models.delete(stage+'\0'+graphic);
+      this.message('Mapping saved. Enable its field links in the rundown, then Preview / Play / Update as needed.');
+    }catch(error){this.message(error.message,true);}
+    finally{this.saving=false;this.$('mappings-view').inert=false;}
+  }
   acceptRevision(before,after){if(!Number.isSafeInteger(after))return;for(const model of this.models.values())if(model.revision===before)model.revision=after;}
   update(state){if(!this.model)return;const fingerprint=JSON.stringify([state.revision,Object.entries(state.connections||{}).map(([id,item])=>[id,item.rows,item.data,item.health])]);if(fingerprint===this.fingerprint)return;this.fingerprint=fingerprint;if(this.sourceRevision!==state.revision){this.sourceRevision=state.revision;this.renderSources();}this.renderSourceValues();this.schedulePreview();}
   fitPreview(){const frame=this.$('mapping-preview');frame.style.transform=`scale(${frame.parentElement.clientWidth/1920})`;}
-  dispose(){this.collectionEditor?.close();this.endDrag();clearTimeout(this.previewTimer);this.previewSequence++;this.resize?.disconnect();}
+  dispose(){this.collectionEditor?.close();this.endDrag();clearTimeout(this.previewTimer);this.previewSequence++;this.selectionSequence++;this.resize?.disconnect();}
 };

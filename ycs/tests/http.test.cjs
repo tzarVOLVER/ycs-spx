@@ -39,6 +39,8 @@ test('Companion commands and native SPX controls share stage-scoped playback wit
   assert.equal(playback.snapshot('stage-1', 'program').graphics.length, 0);
   assert.equal(playback.snapshot('stage-2', 'program').graphics.length, 1);
   assert.equal((await post('/api/ycs/stages/stage-1/graphics/missing/play')).status, 404);
+  const invalid = await post('/api/ycs/stages/stage-1/graphics/ticker/save', { fields: [{field:'f5',value:'x'.repeat(301)}] });
+  assert.equal(invalid.status,422); assert.match((await invalid.json()).fields.f5,/300/);
   const read = url => fetch(base + url).then(response => response.json());
   const beforeNavigation = playback.snapshot('stage-2', 'program');
   await read('/api/ycs/stages'); await read('/api/ycs/stages/stage-2/graphics/ticker/editor');

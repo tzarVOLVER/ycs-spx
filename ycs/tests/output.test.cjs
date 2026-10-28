@@ -12,13 +12,13 @@ async function eventually(condition) {
   }
   assert.fail('Renderer did not reach the expected state');
 }
-async function renderer(t) {
-  const dom = new JSDOM('<main id="composition"></main>', { url: 'http://localhost/output/stage-1/program', runScripts: 'outside-only' });
+async function renderer(t, { lan = false } = {}) {
+  const dom = new JSDOM('<main id="composition"></main>', { url: `http://${lan ? '192.168.1.10' : 'localhost'}/output/stage-1/program`, runScripts: 'outside-only' });
   const { window } = dom;
   const calls = [], reports = [];
   let events, failed = false;
   window.console.error = () => {};
-  window.crypto.randomUUID = randomUUID;
+  window.crypto.randomUUID = lan ? undefined : randomUUID;
   window.fetch = async (url, request) => { reports.push(JSON.parse(request.body)); return { ok: true }; };
   window.io = () => {
     events = { on: (event, callback) => { events[event] = callback; }, emit() {}, disconnect() {} };
@@ -40,6 +40,22 @@ async function renderer(t) {
   const graphic = (id, slot = id, text = 'ROUND 11') => ({ id, slot, z: 10, exitMs: 1, template: '/templates/test.html', data: { f5: text } });
   return { window, root, calls, reports, events: () => events, send, graphic, fail: () => { failed = true; }, recover: () => { failed = false; } };
 }
+
+test('ordinary LAN HTTP outputs start, report distinct identities and retain live update/stop behavior without randomUUID', async t => {
+  const first = await renderer(t, { lan: true }), second = await renderer(t, { lan: true });
+  for (const r of [first, second]) {
+    r.events().connect(); r.send(1, [r.graphic('ticker')]);
+    await eventually(() => r.root.dataset.revision === '1');
+    assert.match(r.reports.at(-1).id, /^[a-f0-9]{32}$/);
+    assert.equal(r.reports.at(-1).state, 'ready');
+    r.send(2, [r.graphic('ticker', 'ticker', 'LAN UPDATE')]);
+    await eventually(() => r.root.dataset.revision === '2');
+    assert.equal(r.calls.filter(call => call.name === 'play').length, 1);
+    r.send(3, []); await eventually(() => r.root.dataset.revision === '3');
+    assert.equal(r.root.querySelectorAll('iframe').length, 0);
+  }
+  assert.notEqual(first.reports[0].id, second.reports[0].id);
+});
 
 test('live field updates retain the ticker iframe and do not replay Play or touch another slot', async t => {
   const r = await renderer(t);

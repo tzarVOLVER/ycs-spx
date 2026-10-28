@@ -7,7 +7,10 @@ let pending;
 let running = false;
 let disposed = false;
 let revision = -1;
-const rendererId = crypto.randomUUID();
+// randomUUID is unavailable on ordinary LAN HTTP origins. getRandomValues
+// remains available there; this ID identifies a renderer, not a credential.
+const rendererId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() :
+  Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
 let renderedRevision = -1;
 let renderingError = '';
 async function report(state = renderingError ? 'error' : 'ready', keepalive = false) {

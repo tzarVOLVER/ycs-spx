@@ -143,7 +143,7 @@ module.exports = function registerYCS(app, config, hooks = {}) {
   app.use((error, req, res, next) => {
     if (!req.path.startsWith('/api/ycs') && !req.path.startsWith('/output') && !repository.matchFile(req.body?.datafile || req.body?.rundownfile)) return next(error);
     if (res.headersSent) return next(error);
-    res.status(error.status || 500).json({ error: error.status ? error.message : 'Stage operation failed; program state retained' });
+    res.status(error.status || 500).json({ error: error.status ? error.message : 'Stage operation failed; program state retained', ...(error.fields ? { fields: error.fields } : {}) });
   });
   return playback;
 };

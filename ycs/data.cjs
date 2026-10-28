@@ -64,6 +64,7 @@ class DataSources extends EventEmitter {
   constructor(file, stages, { sheets = new PublicSheets(), json = new JSONAPI(), now = Date.now } = {}) {
     super(); Object.assign(this, { file: path.resolve(file), stages, sheets, json, now, error: '', document: null, checkedAt: null, closed: false });
     this.runtimes = new Map(); this.bindings = new Map(); this.good = {}; this.inFlight = new Map(); this.controllers = new Set();
+    this.referenceTimes = new Map(); this.retained = new Map(); this.createdAt = now();
     this.cacheFile = this.file.replace(/\.json$/i, '') + '.sheets-cache.json';
     this.cache = {}; this.serial = Promise.resolve(); this.cacheSerial = Promise.resolve(); this.activeReferences = () => [];
     this.ready = this.initialize().catch(() => { this.error = 'Local JSON source unavailable or invalid; retaining last valid values'; });
@@ -115,14 +116,42 @@ class DataSources extends EventEmitter {
     }
     for (const id of this.runtimes.keys()) if (!this.document.connections[id]) this.runtimes.delete(id);
   }
-  reference(input) {
-    if (!input) return;
-    if (input.source && !input.transform) return input.source;
+  bindingRecord(input) {
     const settings = this.document?.connections[input.connection]?.settings;
     // Pin connection settings as well as selection. Old program bindings never
     // silently adopt an edited target or a newly saved field mapping.
-    const record = { ...input, target: settings && { url: settings.url, worksheet: settings.worksheet, range: settings.range } };
-    const id = 'bind.' + hash(record); this.bindings.set(id, record); return id;
+    return { ...input, target: settings && { url: settings.url, worksheet: settings.worksheet, range: settings.range } };
+  }
+  reference(input) {
+    if (!input) return;
+    if (input.source && !input.transform) return input.source;
+    const record = this.bindingRecord(input), id = 'bind.' + hash(record);
+    this.bindings.set(id, record); this.referenceTimes.set(id, this.now()); return id;
+  }
+  previewBinding(input) {
+    if (input.source && !input.transform) return this.resolveSnapshot(input.source);
+    const record = this.bindingRecord(input);
+    // Draft selectors are resolved without registering a live binding or
+    // writing a fallback. Existing committed last-good values remain readable.
+    return this.resolveSnapshot('bind.' + hash(record), record);
+  }
+  retain(owner, references) { this.retained.set(owner, new Set(references.filter(Boolean))); }
+  holdReferences(references) {
+    const owner = {}; this.retain(owner, references);
+    return () => this.retained.delete(owner);
+  }
+  pruneBindings() {
+    const keep = new Set();
+    for (const entry of [...(this.document?.mappings || []), ...(this.document?.defaults || []), ...Object.values(this.document?.sources || {})]) {
+      if (entry.binding) keep.add(this.reference(entry.binding));
+    }
+    for (const references of this.retained.values()) for (const id of references) keep.add(id);
+    for (const entry of this.activeReferences()) keep.add(entry.source);
+    // A short grace period also covers callers reading an ad-hoc reference.
+    // Snapshot reads do not renew it. Preview drafts never enter this registry.
+    const expired = id => !keep.has(id) && this.now() - (this.referenceTimes.get(id) ?? this.createdAt) >= 60000;
+    for (const id of this.bindings.keys()) if (expired(id)) { this.bindings.delete(id); this.referenceTimes.delete(id); }
+    for (const id of Object.keys(this.good)) if (id.startsWith('bind.') && expired(id)) delete this.good[id];
   }
   effective(stage, graphic, field, template) {
     const override = this.document?.mappings.find(item => item.stage === stage && item.graphic === graphic && item.field === field);
@@ -131,15 +160,15 @@ class DataSources extends EventEmitter {
     return { binding: mapping?.source ? { source: mapping.source } : mapping?.binding || null, origin: override ? 'override' : fallback ? 'default' : 'unassigned' };
   }
   mapping(stage, graphic, field, template) { return this.reference(this.effective(stage, graphic, field, template).binding); }
-  resolveSnapshot(id) {
+  resolveSnapshot(id, previewRecord) {
     const source = this.document?.sources[id];
     if (source && source.type !== 'connection-value') return { ...source, type: 'local', health: this.error ? 'error' : 'ok' };
-    const input = source?.binding || this.bindings.get(id);
+    const input = previewRecord || source?.binding || this.bindings.get(id);
     if (!input) return { health: 'error', error: 'Source unavailable' };
     if (Object.hasOwn(input,'static')) return {value:transform(input.static,input.transform),label:'Static value',type:'static',health:'ok'};
     if (input.source) {const nested=this.resolveSnapshot(input.source);return {...nested,value:nested.value===undefined?undefined:transform(nested.value,input.transform)};}
     const ref = source ? this.reference(input) : id, runtime = this.runtimes.get(input.connection), connection = this.document?.connections[input.connection];
-    let error = '', collection;
+    let error = '', collection, resolved;
     try {
       if (input.target && JSON.stringify(input.target) !== JSON.stringify(connection && { url: connection.settings.url, worksheet: connection.settings.worksheet, range: connection.settings.range })) throw new Error('Connection target changed; committed link retained');
       let value;
@@ -147,10 +176,11 @@ class DataSources extends EventEmitter {
         collection=require('./collections.cjs').resolveCollection(connection?.type==='json-api'?runtime?.data:runtime?.rows,input.selection);
         if(collection.invalid)throw new Error(collection.error);value=collection.value;
       }else {value=transform(resolve(connection?.type==='json-api'?runtime?.data:runtime?.rows, input.selection),input.transform);if(!text(value))throw new Error('Transformed value is empty or exceeds 300 characters');}
-      this.good[ref] = value;
+      resolved = value;
+      if (!previewRecord) this.good[ref] = value;
     } catch (problem) { error = problem.message; }
     const status = connection ? this.connectionSnapshot(input.connection, connection) : { health: 'error', error: 'Connection unavailable' };
-    return { ...source,...(collection?{collection}:{}), binding: input, value: this.good[ref], label: source?.label || connection?.label, type: source?.type || 'connection-value', health: error ? 'error' : status.health, error: error || status.error, lastSuccess: status.lastSuccess, lastAttempt: status.lastAttempt, nextRefresh: status.nextRefresh, warning: status.warning };
+    return { ...source,...(collection?{collection}:{}), binding: input, value: resolved ?? this.good[ref], label: source?.label || connection?.label, type: source?.type || 'connection-value', health: error ? 'error' : status.health, error: error || status.error, lastSuccess: status.lastSuccess, lastAttempt: status.lastAttempt, nextRefresh: status.nextRefresh, warning: status.warning };
   }
   value(id) { return id ? this.resolveSnapshot(id).value : undefined; }
   connectionSnapshot(id, connection) {
@@ -158,6 +188,7 @@ class DataSources extends EventEmitter {
     return { ...connection, rows: runtime?.rows || [], ...(connection.type==='json-api'?{data:runtime?.data}:{}), health: this.error ? 'error' : runtime?.health === 'ok' && stale ? 'stale' : runtime?.health || 'loading', lastSuccess: runtime?.lastSuccess || null, lastAttempt: runtime?.lastAttempt || null, nextRefresh: runtime?.nextAt ? new Date(runtime.nextAt).toISOString() : null, error: runtime?.error || '', warning: runtime?.cacheError || '' };
   }
   snapshot() {
+    this.pruneBindings();
     const document = this.document || { version: 2, revision: 0, sources: {}, connections: {}, defaults: [], mappings: [] };
     for (const entry of [...document.mappings, ...document.defaults]) if (entry.binding) this.reference(entry.binding);
     const sources = Object.fromEntries([...new Set([...Object.keys(document.sources), ...this.bindings.keys()])].map(id => [id, this.resolveSnapshot(id)]));
@@ -201,6 +232,7 @@ class DataSources extends EventEmitter {
     });
   }
   async persistCache() {
+    this.pruneBindings();
     // Resolve all registered bindings before saving the restart fallback.
     for (const id of [...Object.keys(this.document.sources), ...this.bindings.keys()]) this.value(id);
     const connections = Object.fromEntries([...this.runtimes].filter(([, runtime]) => (runtime.rows || runtime.data!==undefined) && runtime.lastSuccess).map(([id, runtime]) => [id, { fingerprint: runtime.fingerprint, rows: runtime.rows, data:runtime.data, headerRows:runtime.headerRows, lastSuccess: runtime.lastSuccess }]));
@@ -239,9 +271,16 @@ class DataSources extends EventEmitter {
     await this.persistCache(); return { sourceId, snapshot: this.snapshot() };
   }
   acceptRead(id, rows, data, headerRows) { const runtime = this.runtimes.get(id), now = this.now(); Object.assign(runtime, { rows, data, headerRows:headerRows||[parseInt(this.document.connections[id].settings.range?.match(/\d+/)?.[0])], lastSuccess: new Date(now).toISOString(), lastAttempt: new Date(now).toISOString(), failures: 0, health: 'ok', error: '', cacheError: '', nextAt: now + this.document.connections[id].settings.refreshSeconds * 1000 }); }
-  async ensureCollectionHeaders(input){if(input?.selection?.kind!=='collection'||input.selection.format!=='sheet')return;const runtime=this.runtimes.get(input.connection);if(runtime?.rows&&!runtime.headerRows?.includes(input.selection.headerRow))await this.refreshSheet(input.connection);}
+  async ensureCollectionHeaders(input){
+    const pick=input?.selection;
+    if(!pick||!['collection','row'].includes(pick.kind)||(pick.kind==='collection'&&pick.format!=='sheet'))return;
+    const needsHeader=()=>{const runtime=this.runtimes.get(input.connection);return runtime?.rows&&!runtime.headerRows?.includes(input.selection.headerRow);};
+    if(needsHeader())await this.refreshSheet(input.connection,{headerRows:[input.selection.headerRow]});
+    // An existing coalesced poll may not have requested this draft header.
+    if(needsHeader())await this.refreshSheet(input.connection,{headerRows:[input.selection.headerRow]});
+  }
   headerRows(id){return [...new Set([...this.document.mappings,...this.document.defaults,...Object.values(this.document.sources)].map(item=>item.binding).concat([...this.bindings.values()]).filter(input=>input?.connection===id&&['collection','row'].includes(input.selection?.kind)).map(input=>input.selection.headerRow).filter(Number.isInteger))];}
-  async refreshSheet(id) {
+  async refreshSheet(id, {headerRows=[]} = {}) {
     await this.ready; if (this.closed) return;
     id = this.document?.sources[id]?.binding?.connection || id;
     const connection = this.document?.connections[id]; if (!connection) fail('Unknown data connection', 404);
@@ -250,7 +289,7 @@ class DataSources extends EventEmitter {
     const job = (async () => {
       runtime.lastAttempt = new Date(this.now()).toISOString();
       try {
-        const result = await (connection.type==='json-api'?this.json:this.sheets).read(connection.settings, { signal: controller.signal, headerRows:this.headerRows(id) });
+        const result = await (connection.type==='json-api'?this.json:this.sheets).read(connection.settings, { signal: controller.signal, headerRows:[...new Set([...this.headerRows(id),...headerRows])] });
         if (this.closed || this.runtimes.get(id) !== runtime) return;
         if (connection.type==='google-sheets' && !Array.isArray(result.rows)) fail('Connection returned invalid rows', 502);
         this.acceptRead(id, result.rows,result.data,result.headerRows);
@@ -268,6 +307,6 @@ class DataSources extends EventEmitter {
     await this.ready; if (this.polling || this.closed || this.error) return; this.polling = true;
     try { const due = [...this.runtimes].filter(([, value]) => value.nextAt <= this.now()).map(([id]) => id); for (let index = 0; index < due.length && !this.closed; index += 4) await Promise.allSettled(due.slice(index, index + 4).map(id => this.refreshSheet(id))); } finally { this.polling = false; }
   }
-  close() { this.closed = true; for (const controller of this.controllers) controller.abort(); }
+  close() { this.closed = true; this.retained.clear(); for (const controller of this.controllers) controller.abort(); }
 }
 module.exports = { DataSources, linkable, validate, migrate, binding };

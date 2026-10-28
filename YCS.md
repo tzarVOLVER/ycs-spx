@@ -6,6 +6,18 @@ The initial implementation keeps SPX's normal rundown editor and HTML template l
 
 ## Development setup
 
+### Runtime correctness fixes
+
+Output renderer IDs support ordinary LAN HTTP origins where `crypto.randomUUID` is unavailable. This does not change network binding, authentication, or the need for a later venue/vMix rehearsal.
+
+Editor revisions advance only when saved field values or manual/linked settings change. Companion Play/Stop/Toggle/Update using saved values leaves an open editor valid. Real competing content edits still return 409; preview never advances the saved editor revision.
+
+Mapping drafts carry their stage and graphic identity. Loading another selection disables mapping edits and Save until its model arrives; late responses cannot replace a newer selection or redirect a save. Drafts remain available when returning to their original graphic.
+
+Manual fields and link fallbacks are validated before persistence or playout, including finite numbers, declared numeric bounds, checkbox values, choices, colours, asset URL schemes, text limits and story schemas. Invalid requests return 422 with `fields` errors for the rundown editor, while retaining saved data and program. Manual ordinary textareas retain their existing 64 KB allowance; linked scalar values remain limited to 300 characters.
+
+Unsaved mapping previews resolve selectors without retaining bindings or updating last-good caches. Unused registered references expire after a 60-second grace period. Saved mappings/defaults, legacy source aliases, program, selected preview and pending disk-write descriptors retain their bindings; replacing a mapping still leaves the previous on-air selector live until an explicit Update/Play/Stop.
+
 ### One shared ticker template
 
 All newly generated stage rundowns use `/ycs/ticker/ticker.html`. Each output still mounts its own iframe and commits its own fields and data bindings. The shared ticker loads neutral defaults only, with no broadcast identity, instance registry or stage-specific JSON fetch. Old saved hidden `f0` values remain compatibility metadata and cannot route or select another instance. Legacy numbered HTML files remain available for existing installations.

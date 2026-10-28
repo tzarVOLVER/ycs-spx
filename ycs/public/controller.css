@@ -41,6 +41,8 @@
 .ycs-editor-tools .l-icon:hover{color:#e1e7eb}
 .ycs-pending{display:block;margin-top:8px;padding:5px 8px;border-radius:3px;background:#51462c;color:#ffe0a2;font:11px/1.4 Arial,sans-serif}
 .ycs-pending[hidden],.ycs-original-fields{display:none!important}
+.ycs-field-error{display:block;grid-column:2;color:#ffd180;font:11px/1.4 Arial,sans-serif;margin:3px 0 0 34px}
+.ycs-editor-field .gcinput[aria-invalid="true"]{border-color:#ffd180!important}
 @container(max-width:420px){.ycs-editor-field{grid-template-columns:92px minmax(0,1fr);gap:0 6px}.ycs-editor-field>label{font-size:11px}.ycs-editor-toggles{margin-left:0}.ycs-checkbox-field{display:flex}}
 @media(max-width:800px){.ycs-editor-field{grid-template-columns:92px minmax(0,1fr);gap:0 6px}.ycs-editor-toggles{margin-left:0}.ycs-checkbox-field{display:flex}}
 @media(pointer:coarse){.ycs-editor-field .gcinput{height:40px!important;font-size:16px!important}.ycs-link-toggle{height:40px;width:36px;flex-basis:36px}.ycs-editor-field{min-height:44px}.ycs-checkbox-field{min-height:40px}}

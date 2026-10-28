@@ -10,6 +10,15 @@ const {types,normalizeField}=require('./field-types.cjs');
 const clone = value => structuredClone(value);
 const identifier = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$/;
 function fail(message, status = 400) { const error = new Error(message); error.status = status; throw error; }
+function manualValue(definition, value) {
+  try { return normalizeField(definition, value, { manual: true }); }
+  catch (cause) {
+    const error = new Error(`${definition.title || definition.field}: ${cause.message}`);
+    error.status = 422;
+    error.fields = { [definition.field]: cause.message };
+    throw error;
+  }
+}
 
 class RundownRepository {
   constructor(root, stages) {
@@ -51,17 +60,18 @@ function fieldValues(item, input) {
   if (!Array.isArray(input) || input.length > 100) fail('Fields must be an array');
   const definitions = new Map(item.DataFields.map(field => [field.field, field]));
   const seen = new Set();
+  const values = new Map();
   for (const incoming of input) {
     if (!incoming || typeof incoming.field !== 'string' || seen.has(incoming.field)) fail('Invalid or duplicate field');
     seen.add(incoming.field);
     const definition = definitions.get(incoming.field);
     if (!definition) fail('Unknown template field');
     if (typeof incoming.value !== 'string' || incoming.value.length > 65536) fail('Invalid template field value');
-    if(definition.ycsCollection)normalizeField(definition,incoming.value);
+    values.set(incoming.field, linkable(item, incoming.field) ? manualValue(definition, incoming.value) : incoming.value);
     // Hidden instance identity cannot be changed by an editor/API patch.
     if (incoming.field === 'f0' && definition.ftype === 'hidden' && incoming.value !== definition.value) fail('Instance identity is read-only');
   }
-  for (const incoming of input) definitions.get(incoming.field).value = incoming.value;
+  for (const [field, value] of values) definitions.get(field).value = value;
 }
 
 function descriptor(item, slots, sources) {
@@ -111,6 +121,11 @@ class Playback extends EventEmitter {
     return result;
   }
   publish(stageId) {
+    // Keep committed program and selected preview bindings alive even after a
+    // mapping is replaced. They remain authoritative until Play/Update/Stop.
+    this.sources?.retain?.(this, [...this.states.values()].flatMap(state =>
+      [...state.program, ...(state.draft ? [state.draft] : [])].flatMap(graphic =>
+        Object.values(graphic.links || {}).filter(link => link.mode === 'linked').map(link => link.source))));
     this.state(stageId).revision++;
     for (const mode of ['program', 'preview']) this.emit(stageId + ':' + mode, this.snapshot(stageId, mode));
   }
@@ -144,7 +159,7 @@ class Playback extends EventEmitter {
           const checked=require('./data.cjs').binding(this.sources.document,pick);
           const connection=this.sources.document.connections[checked.connection||this.sources.document.sources[checked.source]?.binding?.connection];
           if(connection?.project&&connection.project!==this.repository.stage(stageId).project)fail('This source belongs to another project',422);
-          const ref=this.sources.reference(checked);await this.sources.ensureCollectionHeaders(checked);const source=this.sources.resolveSnapshot(ref);collection=source.collection;
+          await this.sources.ensureCollectionHeaders(checked);const source=this.sources.previewBinding(checked);collection=source.collection;
           if(source.value===undefined)throw new Error(source.error||'Waiting for a valid source value');
           value=normalizeField(field,source.value);health=source.health;error=source.error||'';
         }catch(problem){health='error';error=problem.message;}
@@ -166,6 +181,7 @@ class Playback extends EventEmitter {
       // than saved onair flags, preview selection or a Companion-local toggle.
       if (action === 'toggle') action = active ? 'stop' : 'play';
       const changesData = ['play', 'update', 'save', 'preview'].includes(action);
+      const originalContent = JSON.stringify([item.DataFields, item.ycsLinks || {}]);
       if (changesData && options.revision !== undefined && options.revision !== (item.ycsEditRevision || 0)) fail('This graphic was saved in another controller. Reload before continuing.', 409);
       if (changesData && options.links !== undefined && (!options.links || typeof options.links !== 'object' || Array.isArray(options.links))) fail('Invalid field links');
       if (changesData) {
@@ -174,58 +190,66 @@ class Playback extends EventEmitter {
         fieldValues(checked, fields);
         const links = clone(item.ycsLinks || {});
         for (const [field, link] of Object.entries(options.links || {})) {
-          if (!linkable(item, field) || !link || !['manual', 'linked'].includes(link.mode) || typeof link.manual !== 'string' || link.manual.length > (item.DataFields.find(def=>def.field===field)?.ycsCollection?65536:300)) fail('Invalid field link');
+          if (!linkable(item, field) || !link || !['manual', 'linked'].includes(link.mode) || typeof link.manual !== 'string') fail('Invalid field link');
           if (link.mode === 'linked' && !this.sources?.mapping(stageId, graphicId, field, item.relpath)) fail('Assign a source in Data Manager before linking this field', 422);
-          links[field] = { mode: link.mode, manual: link.manual };
+          links[field] = { mode: link.mode, manual: manualValue(item.DataFields.find(def => def.field === field), link.manual) };
         }
         for (const field of item.DataFields) {
           if (!linkable(item, field.field)) continue;
           const link = links[field.field];
           if (!link) continue;
           const incoming = fields?.find(candidate => candidate.field === field.field);
-          if (link.mode === 'manual' && incoming) link.manual = incoming.value;
-          if (link.manual.length > (field.ycsCollection?65536:300)) fail('Manual value exceeds the field limit');
-          if(field.ycsCollection)normalizeField(field,link.manual);
+          if (link.mode === 'manual' && incoming) link.manual = checked.DataFields.find(candidate => candidate.field === field.field).value;
+          link.manual = manualValue(field, link.manual);
           // The persisted field remains the manual fallback, not a transient
           // source value copied out of the editor's read-only input.
           checked.DataFields.find(candidate => candidate.field === field.field).value = link.manual;
         }
         item.DataFields = checked.DataFields;
         if (Object.keys(links).length) item.ycsLinks = links;
+        // Validate the resulting saved/manual values too, including fields
+        // omitted by Companion or by a partial API patch.
+        for (const field of item.DataFields) if (linkable(item, field.field)) field.value = manualValue(field, field.value ?? '');
       }
+      const contentChanged = originalContent !== JSON.stringify([item.DataFields, item.ycsLinks || {}]);
       const graphic = descriptor({ ...item, ycsStage: stageId }, this.slots, this.sources);
-      if (action === 'preview') {
-        state.draft = graphic;
-      } else if (action === 'save') {
-        item.ycsEditRevision = (item.ycsEditRevision || 0) + 1;
-        await this.repository.write(stageId, rundown);
-        if (state.draft?.id === graphicId) state.draft = graphic;
-      } else if (action === 'continue') {
-        if (!active) fail('Graphic is not active', 409);
-        if (!(Number(item.steps) > 1)) fail('Graphic has no continuation step', 422);
-        // An explicit increment is replayed only within this connected session.
-        active.continuation = (active.continuation || 0) + 1;
-      } else {
-        let next = clone(state.program);
-        if (action === 'play') {
-          // Repeating Play for an active graphic updates it without an IN replay.
-          next = next.filter(current => current.slot !== graphic.slot);
-          if (active?.continuation) graphic.continuation = active.continuation;
-          next.push(graphic);
-        } else if (action === 'stop') {
-          next = next.filter(current => current.id !== graphicId);
-        } else if (active) {
-          graphic.continuation = active.continuation;
-          next = next.map(current => current.id === graphicId ? graphic : current);
+      // A poll may prune while a rundown write awaits disk. Hold this descriptor
+      // until its links have been installed in program/preview, or the write fails.
+      const release = this.sources?.holdReferences?.(Object.values(graphic.links || {}).filter(link => link.mode === 'linked').map(link => link.source));
+      try {
+        if (action === 'preview') {
+          state.draft = graphic;
+        } else if (action === 'save') {
+          if (contentChanged) item.ycsEditRevision = (item.ycsEditRevision || 0) + 1;
+          await this.repository.write(stageId, rundown);
+          if (state.draft?.id === graphicId) state.draft = graphic;
+        } else if (action === 'continue') {
+          if (!active) fail('Graphic is not active', 409);
+          if (!(Number(item.steps) > 1)) fail('Graphic has no continuation step', 422);
+          // An explicit increment is replayed only within this connected session.
+          active.continuation = (active.continuation || 0) + 1;
+        } else {
+          let next = clone(state.program);
+          if (action === 'play') {
+            // Repeating Play for an active graphic updates it without an IN replay.
+            next = next.filter(current => current.slot !== graphic.slot);
+            if (active?.continuation) graphic.continuation = active.continuation;
+            next.push(graphic);
+          } else if (action === 'stop') {
+            next = next.filter(current => current.id !== graphicId);
+          } else if (active) {
+            graphic.continuation = active.continuation;
+            next = next.map(current => current.id === graphicId ? graphic : current);
+          }
+          if (contentChanged) item.ycsEditRevision = (item.ycsEditRevision || 0) + 1;
+          for (const candidate of rundown.templates) candidate.onair = String(next.some(current => current.id === candidate.itemID));
+          await this.repository.write(stageId, rundown);
+          state.program = next;
+          if (state.draft?.id === graphicId && action !== 'stop') state.draft = graphic;
         }
-        if (changesData) item.ycsEditRevision = (item.ycsEditRevision || 0) + 1;
-        for (const candidate of rundown.templates) candidate.onair = String(next.some(current => current.id === candidate.itemID));
-        await this.repository.write(stageId, rundown);
-        state.program = next;
-        if (state.draft?.id === graphicId && action !== 'stop') state.draft = graphic;
-      }
-      this.publish(stageId);
-      return { ...this.snapshot(stageId, action === 'preview' || action === 'save' ? 'preview' : 'program'), editorRevision: item.ycsEditRevision || 0 };
+        this.publish(stageId);
+        return { ...this.snapshot(stageId, action === 'preview' || action === 'save' ? 'preview' : 'program'), editorRevision: item.ycsEditRevision || 0 };
+      } finally { release?.(); }
     });
   }
   refreshLinks(stageId) {
