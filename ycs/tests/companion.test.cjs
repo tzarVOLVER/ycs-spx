@@ -36,4 +36,26 @@ test('generated Companion controls execute saved stage-specific graphics without
   const fourth = build(base, [...stages, { id: 'stage-4', title: 'Stage 4' }]);
   assert.equal(fourth.pages[4].controls[0][1].steps[0].action_sets.down[0].options.url.value, '/api/ycs/stages/stage-4/graphics/ticker/play');
   for (const invalid of ['https://user:secret@example.com', 'file:///tmp/a', base + '/path']) assert.throws(() => build(invalid, stages));
+  const toggleProfile = build(base, stages, 'ycs_spx', { toggles: true });
+  for (const [index, stage] of stages.entries()) {
+    const row = toggleProfile.pages[index + 1].controls[0];
+    const request = async column => {
+      const action = row[column].steps[0].action_sets.down[0];
+      assert.deepEqual(row[column].steps[0].action_sets.up, []);
+      const response = await fetch(base + action.options.url.value, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      assert.equal(response.status, 200); return response.json();
+    };
+    assert.match(row[1].steps[0].action_sets.down[0].options.url.value, /\/ticker\/toggle$/);
+    await request(3); // Lower third toggle on.
+    let snapshot = await request(1); assert.equal(snapshot.graphics.length, 2);
+    snapshot = await request(1); assert.deepEqual(snapshot.graphics.map(item => item.id), ['lower-third']);
+    // An explicit command from a rundown/controller changes what the next
+    // toggle does; Companion carries no separate local on/off state.
+    await playback.command(stage.id, 'ticker', 'play');
+    snapshot = await request(1); assert.deepEqual(snapshot.graphics.map(item => item.id), ['lower-third']);
+    await request(5); assert.equal(playback.snapshot(stage.id, 'program').graphics.length, 0);
+  }
+  const rejected = await fetch(base + '/api/ycs/stages/stage-1/graphics/ticker/toggle', { method: 'POST', headers: { Origin: 'https://untrusted.example', 'Content-Type': 'application/json' }, body: '{}' });
+  assert.equal(rejected.status, 403);
+  assert.equal(playback.snapshot('stage-1', 'program').graphics.length, 0);
 });

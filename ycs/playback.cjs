@@ -155,11 +155,16 @@ class Playback extends EventEmitter {
     return {revision:this.sources.snapshot().revision,template:item.relpath,title:item.description||graphicId,graphic,fields};
   }
   command(stageId, graphicId, action, fields, options = {}) {
-    if (!['play', 'stop', 'update', 'preview', 'save', 'continue'].includes(action)) fail('Unknown command');
+    if (!['play', 'stop', 'toggle', 'update', 'preview', 'save', 'continue'].includes(action)) fail('Unknown command');
     return this.queue(stageId, async () => {
       const rundown = await this.repository.read(stageId);
       const item = this.repository.item(rundown, graphicId);
       await this.sources?.ready;
+      const state = this.state(stageId);
+      const active = state.program.find(current => current.id === graphicId);
+      // Resolve inside the stage queue, using actual program membership rather
+      // than saved onair flags, preview selection or a Companion-local toggle.
+      if (action === 'toggle') action = active ? 'stop' : 'play';
       const changesData = ['play', 'update', 'save', 'preview'].includes(action);
       if (changesData && options.revision !== undefined && options.revision !== (item.ycsEditRevision || 0)) fail('This graphic was saved in another controller. Reload before continuing.', 409);
       if (changesData && options.links !== undefined && (!options.links || typeof options.links !== 'object' || Array.isArray(options.links))) fail('Invalid field links');
@@ -189,8 +194,6 @@ class Playback extends EventEmitter {
         if (Object.keys(links).length) item.ycsLinks = links;
       }
       const graphic = descriptor({ ...item, ycsStage: stageId }, this.slots, this.sources);
-      const state = this.state(stageId);
-      const active = state.program.find(current => current.id === graphicId);
       if (action === 'preview') {
         state.draft = graphic;
       } else if (action === 'save') {
