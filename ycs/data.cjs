@@ -11,16 +11,18 @@ const clone = value => structuredClone(value);
 const keyPattern = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$/;
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 function fail(message, status = 400) { const error = new Error(message); error.status = status; throw error; }
+function cachedValue(value) { if(typeof value!=='string'||value.length>65536)return false;if(value.length<=300&&value.trim())return true;try{return Array.isArray(JSON.parse(value));}catch{return false;} }
 function text(value) { return typeof value === 'string' && value.trim().length > 0 && value.length <= 300; }
 function connectionSettings(input) { const settings = normalizeSettings(input); delete settings.cell; return settings; }
 function binding(document, input) {
+  if(input?.selection?.kind==='collection'&&input.transform&&input.transform.kind!=='none')fail('Apply transforms to individual values, not a story list');
   const change=normalizeTransform(input?.transform), extra=change?{transform:change}:{};
   if(input && Object.hasOwn(input,'static')) {if(typeof input.static!=='string'||input.static.length>300)fail('Static values must be text up to 300 characters');return {static:input.static,...extra};}
   if (input === null) return null;
   if (input?.source && Object.hasOwn(document.sources, input.source)) return { source: input.source,...extra };
   const connection = Object.hasOwn(document.connections, input?.connection) && document.connections[input.connection];
   if (!connection) fail('Choose a saved connection');
-  if ((connection.type==='json-api') !== (input.selection?.kind==='json')) fail('Choose a compatible source value');
+  if ((connection.type==='json-api') !== (input.selection?.kind==='json'||input.selection?.kind==='collection'&&input.selection.format==='json')) fail('Choose a compatible source value');
   return { connection: input.connection, selection: selection(input.selection, connection.settings),...extra };
 }
 function validate(document) {
@@ -77,7 +79,7 @@ class DataSources extends EventEmitter {
     try { await fs.writeFile(this.file, JSON.stringify(initial, null, 2), { flag: 'wx' }); } catch (error) { if (error.code !== 'EEXIST') throw error; }
     try {
       const raw = await fs.readFile(this.cacheFile, 'utf8');
-      if (raw.length < 4194304) { const cache = JSON.parse(raw); if (cache.version === 2) { this.cache = cache.connections || {}; this.good = Object.fromEntries(Object.entries(cache.good || {}).filter(([key, value]) => key.startsWith('bind.') && text(value))); } else this.legacyCache = cache.values; }
+      if (raw.length < 4194304) { const cache = JSON.parse(raw); if (cache.version === 2) { this.cache = cache.connections || {}; this.good = Object.fromEntries(Object.entries(cache.good || {}).filter(([key, value]) => key.startsWith('bind.') && cachedValue(value))); } else this.legacyCache = cache.values; }
     } catch { /* Cache is optional; manual fields remain usable. */ }
     const original = await fs.readFile(this.file, 'utf8');
     const parsed = JSON.parse(original.replace(/^\uFEFF/, ''));
@@ -109,7 +111,7 @@ class DataSources extends EventEmitter {
       const fingerprint = hash(connection.settings); if (this.runtimes.get(id)?.fingerprint === fingerprint) continue;
       let saved = this.cache[id];
       if (connection.type!=='json-api' && (!Array.isArray(saved?.rows) || saved.rows.length > 200 || saved.rows.some(row => !Array.isArray(row) || row.length > 32 || row.some(cell => !cell || typeof cell.address !== 'string' || typeof cell.value !== 'string')))) saved = undefined;
-      this.runtimes.set(id, { fingerprint, rows: saved?.fingerprint === fingerprint ? saved.rows : undefined, data: saved?.fingerprint === fingerprint ? saved.data : undefined, lastSuccess: saved?.fingerprint === fingerprint ? saved.lastSuccess : null, lastAttempt: null, nextAt: 0, failures: 0, health: 'loading', error: '' });
+      this.runtimes.set(id, { fingerprint, rows: saved?.fingerprint === fingerprint ? saved.rows : undefined, data: saved?.fingerprint === fingerprint ? saved.data : undefined, headerRows:saved?.headerRows||[parseInt(connection.settings.range?.match(/\d+/)?.[0])],lastSuccess: saved?.fingerprint === fingerprint ? saved.lastSuccess : null, lastAttempt: null, nextAt: 0, failures: 0, health: 'loading', error: '' });
     }
     for (const id of this.runtimes.keys()) if (!this.document.connections[id]) this.runtimes.delete(id);
   }
@@ -137,15 +139,18 @@ class DataSources extends EventEmitter {
     if (Object.hasOwn(input,'static')) return {value:transform(input.static,input.transform),label:'Static value',type:'static',health:'ok'};
     if (input.source) {const nested=this.resolveSnapshot(input.source);return {...nested,value:nested.value===undefined?undefined:transform(nested.value,input.transform)};}
     const ref = source ? this.reference(input) : id, runtime = this.runtimes.get(input.connection), connection = this.document?.connections[input.connection];
-    let error = '';
+    let error = '', collection;
     try {
       if (input.target && JSON.stringify(input.target) !== JSON.stringify(connection && { url: connection.settings.url, worksheet: connection.settings.worksheet, range: connection.settings.range })) throw new Error('Connection target changed; committed link retained');
-      const value=transform(resolve(connection?.type==='json-api'?runtime?.data:runtime?.rows, input.selection),input.transform);
-      if(!text(value))throw new Error('Transformed value is empty or exceeds 300 characters');
+      let value;
+      if(input.selection.kind==='collection'){
+        collection=require('./collections.cjs').resolveCollection(connection?.type==='json-api'?runtime?.data:runtime?.rows,input.selection);
+        if(collection.invalid)throw new Error(collection.error);value=collection.value;
+      }else {value=transform(resolve(connection?.type==='json-api'?runtime?.data:runtime?.rows, input.selection),input.transform);if(!text(value))throw new Error('Transformed value is empty or exceeds 300 characters');}
       this.good[ref] = value;
     } catch (problem) { error = problem.message; }
     const status = connection ? this.connectionSnapshot(input.connection, connection) : { health: 'error', error: 'Connection unavailable' };
-    return { ...source, binding: input, value: this.good[ref], label: source?.label || connection?.label, type: source?.type || 'connection-value', health: error ? 'error' : status.health, error: error || status.error, lastSuccess: status.lastSuccess, lastAttempt: status.lastAttempt, nextRefresh: status.nextRefresh, warning: status.warning };
+    return { ...source,...(collection?{collection}:{}), binding: input, value: this.good[ref], label: source?.label || connection?.label, type: source?.type || 'connection-value', health: error ? 'error' : status.health, error: error || status.error, lastSuccess: status.lastSuccess, lastAttempt: status.lastAttempt, nextRefresh: status.nextRefresh, warning: status.warning };
   }
   value(id) { return id ? this.resolveSnapshot(id).value : undefined; }
   connectionSnapshot(id, connection) {
@@ -198,7 +203,7 @@ class DataSources extends EventEmitter {
   async persistCache() {
     // Resolve all registered bindings before saving the restart fallback.
     for (const id of [...Object.keys(this.document.sources), ...this.bindings.keys()]) this.value(id);
-    const connections = Object.fromEntries([...this.runtimes].filter(([, runtime]) => (runtime.rows || runtime.data!==undefined) && runtime.lastSuccess).map(([id, runtime]) => [id, { fingerprint: runtime.fingerprint, rows: runtime.rows, data:runtime.data, lastSuccess: runtime.lastSuccess }]));
+    const connections = Object.fromEntries([...this.runtimes].filter(([, runtime]) => (runtime.rows || runtime.data!==undefined) && runtime.lastSuccess).map(([id, runtime]) => [id, { fingerprint: runtime.fingerprint, rows: runtime.rows, data:runtime.data, headerRows:runtime.headerRows, lastSuccess: runtime.lastSuccess }]));
     const raw = JSON.stringify({ version: 2, connections, good: this.good });
     this.cacheSerial = this.cacheSerial.catch(() => {}).then(async () => { await fs.writeFile(this.cacheFile + '.tmp', raw); await fs.rename(this.cacheFile + '.tmp', this.cacheFile); });
     await this.cacheSerial; this.cache = connections;
@@ -216,7 +221,7 @@ class DataSources extends EventEmitter {
       if (next.connections[id] && JSON.stringify({ ...next.connections[id].settings, refreshSeconds: 0 }) !== JSON.stringify({ ...settings, refreshSeconds: 0 }) && this.usages(id).length) fail('This connection is in use. Add a new connection and remap its fields before changing its target.', 409);
       next.connections[id] = { type, label: label.trim(), settings,...(project?{project}:{}) };
     });
-    this.acceptRead(id, result.rows,result.data); await this.persistCache().catch(() => { this.runtimes.get(id).cacheError = 'Live data is available, but its restart cache could not be saved'; }); this.emit('change');
+    this.acceptRead(id, result.rows,result.data,result.headerRows); await this.persistCache().catch(() => { this.runtimes.get(id).cacheError = 'Live data is available, but its restart cache could not be saved'; }); this.emit('change');
     return { connectionId: id, snapshot: this.snapshot() };
   }
   removeConnection(id, revision) { return this.edit(revision, next => {
@@ -233,7 +238,9 @@ class DataSources extends EventEmitter {
     await this.edit(added.snapshot.revision, next => { next.sources[sourceId] = { type: 'connection-value', label, binding: { connection: added.connectionId, selection: { kind: 'cell', cell: settings.cell } } }; });
     await this.persistCache(); return { sourceId, snapshot: this.snapshot() };
   }
-  acceptRead(id, rows, data) { const runtime = this.runtimes.get(id), now = this.now(); Object.assign(runtime, { rows, data, lastSuccess: new Date(now).toISOString(), lastAttempt: new Date(now).toISOString(), failures: 0, health: 'ok', error: '', cacheError: '', nextAt: now + this.document.connections[id].settings.refreshSeconds * 1000 }); }
+  acceptRead(id, rows, data, headerRows) { const runtime = this.runtimes.get(id), now = this.now(); Object.assign(runtime, { rows, data, headerRows:headerRows||[parseInt(this.document.connections[id].settings.range?.match(/\d+/)?.[0])], lastSuccess: new Date(now).toISOString(), lastAttempt: new Date(now).toISOString(), failures: 0, health: 'ok', error: '', cacheError: '', nextAt: now + this.document.connections[id].settings.refreshSeconds * 1000 }); }
+  async ensureCollectionHeaders(input){if(input?.selection?.kind!=='collection'||input.selection.format!=='sheet')return;const runtime=this.runtimes.get(input.connection);if(runtime?.rows&&!runtime.headerRows?.includes(input.selection.headerRow))await this.refreshSheet(input.connection);}
+  headerRows(id){return [...new Set([...this.document.mappings,...this.document.defaults,...Object.values(this.document.sources)].map(item=>item.binding).concat([...this.bindings.values()]).filter(input=>input?.connection===id&&['collection','row'].includes(input.selection?.kind)).map(input=>input.selection.headerRow).filter(Number.isInteger))];}
   async refreshSheet(id) {
     await this.ready; if (this.closed) return;
     id = this.document?.sources[id]?.binding?.connection || id;
@@ -243,10 +250,10 @@ class DataSources extends EventEmitter {
     const job = (async () => {
       runtime.lastAttempt = new Date(this.now()).toISOString();
       try {
-        const result = await (connection.type==='json-api'?this.json:this.sheets).read(connection.settings, { signal: controller.signal });
+        const result = await (connection.type==='json-api'?this.json:this.sheets).read(connection.settings, { signal: controller.signal, headerRows:this.headerRows(id) });
         if (this.closed || this.runtimes.get(id) !== runtime) return;
         if (connection.type==='google-sheets' && !Array.isArray(result.rows)) fail('Connection returned invalid rows', 502);
-        this.acceptRead(id, result.rows,result.data);
+        this.acceptRead(id, result.rows,result.data,result.headerRows);
         try { await this.persistCache(); } catch { runtime.cacheError = 'Live data is available, but its restart cache could not be saved'; }
       } catch (error) {
         if (this.closed || this.runtimes.get(id) !== runtime) return;

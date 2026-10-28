@@ -67,7 +67,7 @@ function parseResponse(raw, range) {
   if (result.table.cols.length > width || result.table.rows.length > height) fail('Google returned more cells than the requested range', 502);
   return Array.from({ length: height }, (_, row) => Array.from({ length: width }, (_, column) => {
     const value = displayValue(result.table.rows[row]?.c?.[column]);
-    return { address: columnName(selected.firstColumn + column) + (selected.firstRow + row), value: value.slice(0, 301), usable: usable(value) };
+    return { address: columnName(selected.firstColumn + column) + (selected.firstRow + row), value: value.slice(0, 4001), usable: usable(value) };
   }));
 }
 async function readLimited(response, limit = MAX_BODY) {
@@ -102,21 +102,35 @@ class PublicSheets {
       fail('Could not list worksheets. Retry or enter a tab name/gid manually.', 502);
     } finally { clearTimeout(timer); }
   }
-  async read(input, { singleCell = false, signal } = {}) {
+  async read(input, { singleCell = false, signal, headerRows = [] } = {}) {
     const settings = normalizeSettings(input), range = singleCell ? settings.cell : settings.range;
     if (!range) fail('Choose a cell before saving the source');
     const timeout = new AbortController();
     const timer = setTimeout(() => timeout.abort(), 8000); timer.unref?.();
     try {
       const combined = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
-      const response = await this.fetcher(endpoint(settings, range), {
-        signal: combined, redirect: 'manual', credentials: 'omit', referrerPolicy: 'no-referrer',
-        headers: { Accept: 'application/javascript, application/json', 'Cache-Control': 'no-cache' }
-      });
-      if (!response.ok || response.status !== 200 || /text\/html/i.test(response.headers.get('content-type') || '')) fail('Sheet is unavailable or requires sign-in. Check Anyone with the link → Viewer, the URL and worksheet.', 502);
-      const rows = parseResponse(await readLimited(response), range);
+      const readRange=async selected=>{
+        const response = await this.fetcher(endpoint(settings, selected), {
+          signal: combined, redirect: 'manual', credentials: 'omit', referrerPolicy: 'no-referrer',
+          headers: { Accept: 'application/javascript, application/json', 'Cache-Control': 'no-cache' }
+        });
+        if (!response.ok || response.status !== 200 || /text\/html/i.test(response.headers.get('content-type') || '')) fail('Sheet is unavailable or requires sign-in. Check Anyone with the link → Viewer, the URL and worksheet.', 502);
+        return parseResponse(await readLimited(response), selected);
+      };
+      const rows=await readRange(range),bounds=parseRange(range);
+      const headers=singleCell?[]:[...new Set([bounds.firstRow,...headerRows])];
+      if(headers.length>16||headers.some(row=>!Number.isInteger(row)||row<bounds.firstRow||row>bounds.lastRow))fail('Use at most 16 header rows within the connection range');
+      // The query endpoint infers a type per column and can return a text header
+      // as null above checkboxes/numbers. Read each requested header on its own
+      // and overlay it at its original address. Data stays in one shared poll.
+      if(bounds.firstRow!==bounds.lastRow)for(let offset=0;offset<headers.length;offset+=4){
+        await Promise.all(headers.slice(offset,offset+4).map(async row=>{
+          const selected=columnName(bounds.firstColumn)+row+':'+columnName(bounds.lastColumn)+row;
+          rows[row-bounds.firstRow]=(await readRange(selected))[0];
+        }));
+      }
       if (singleCell && !rows[0][0].usable) fail('Selected cell is empty or exceeds 300 characters; retaining the last valid value', 502);
-      return { settings, rows, ...(singleCell ? { value: rows[0][0].value } : {}) };
+      return { settings, rows, headerRows:headers, ...(singleCell ? { value: rows[0][0].value } : {}) };
     } catch (error) {
       if (error.status) throw error;
       fail(timeout.signal.aborted ? 'Google Sheets request timed out; retaining the last valid value' : 'Could not reach Google Sheets; retaining the last valid value', 502);

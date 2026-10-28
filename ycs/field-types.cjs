@@ -1,7 +1,9 @@
 'use strict';
+const {schema,normalizeValue}=require('./collections.cjs');
 const types={textfield:'Text',textarea:'Text',number:'Number',checkbox:'Boolean',dropdown:'Choice',filelist:'Image / file',color:'Colour'};
 function linkable(item,field) {return item.DataFields.some(def=>def.field===field&&Object.hasOwn(types,def.ftype));}
 function normalizeField(field,value) {
+  if(schema(field))return normalizeValue(field,value);
   if(value===undefined||value===null||typeof value==='object') throw new Error('Select a single compatible value');
   const text=String(value);
   if(text.length>300) throw new Error('Value exceeds 300 characters');

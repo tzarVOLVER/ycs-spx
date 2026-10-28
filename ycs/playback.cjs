@@ -42,6 +42,10 @@ class RundownRepository {
   item(rundown, id) { return rundown.templates.find(item => item.itemID === id) || fail('Unknown graphic', 404); }
 }
 
+function prepareEdits(item,edits){
+  if(!Array.isArray(edits)||edits.length>100||new Set(edits.map(edit=>edit.field)).size!==edits.length)fail('Invalid field mappings');
+  return edits.map(edit=>{const field=item.DataFields.find(field=>field.field===edit.field);if(!field||!linkable(item,edit.field))fail('Unknown or protected field',422);const next=clone(edit),pick=next.binding;if(pick){const isList=pick.selection?.kind==='collection';if(Boolean(field.ycsCollection)!==isList)fail(field.ycsCollection?'Map a story list for this field':'Choose a single value for this field',422);if(isList){const schema=require('./collections.cjs').schema(field);if(!schema)fail('Unsupported template collection schema',422);if(Object.keys(pick.selection.fields||{}).some(key=>!schema.fields.some(field=>field.key===key)))fail('Unknown story field',422);pick.selection.required=schema.fields.filter(field=>field.required).map(field=>field.key);}}return next;});
+}
 function fieldValues(item, input) {
   if (input === undefined) return;
   if (!Array.isArray(input) || input.length > 100) fail('Fields must be an array');
@@ -53,6 +57,7 @@ function fieldValues(item, input) {
     const definition = definitions.get(incoming.field);
     if (!definition) fail('Unknown template field');
     if (typeof incoming.value !== 'string' || incoming.value.length > 65536) fail('Invalid template field value');
+    if(definition.ycsCollection)normalizeField(definition,incoming.value);
     // Hidden instance identity cannot be changed by an editor/API patch.
     if (incoming.field === 'f0' && definition.ftype === 'hidden' && incoming.value !== definition.value) fail('Instance identity is read-only');
   }
@@ -69,7 +74,7 @@ function descriptor(item, slots, sources) {
     if (!linkable(item, field)) continue;
     const source = sources?.mapping(item.ycsStage, item.itemID, field, item.relpath);
     const definition=item.DataFields.find(item=>item.field===field);
-    links[field] = { ...link, source, definition:{ftype:definition.ftype,...(definition.items?{items:definition.items}:{})} };
+    links[field] = { ...link, source, definition:{ftype:definition.ftype,...(definition.ycsCollection?{ycsCollection:definition.ycsCollection}:{}),...(definition.items?{items:definition.items}:{})} };
     if (link.mode === 'linked' && sources?.value(source)!==undefined) {try {data[field]=normalizeField(definition,sources.value(source));}catch{/* Retain the manual fallback for incompatible source values. */}}
   }
   return { id: item.itemID, slot: item.ycsSlot, z: slot.order, exitMs: slot.exitMs ?? 250, template: '/templates' + item.relpath, data, ...(Object.keys(links).length ? { links } : {}) };
@@ -112,7 +117,7 @@ class Playback extends EventEmitter {
   async catalog(stageId) {
     await this.sources?.ready;
     const rundown = await this.repository.read(stageId);
-    return rundown.templates.map(item => ({ id:item.itemID,title:item.description||item.itemID,slot:item.ycsSlot,template:item.relpath,fields:item.DataFields.filter(field=>linkable(item,field.field)).map(field=>({field:field.field,title:field.title||field.field,ftype:field.ftype,type:types[field.ftype],required:field.required===true})),mapped:item.DataFields.filter(field=>linkable(item,field.field)&&this.sources?.mapping(stageId,item.itemID,field.field,item.relpath)).length }));
+    return rundown.templates.map(item => ({ id:item.itemID,title:item.description||item.itemID,slot:item.ycsSlot,template:item.relpath,fields:item.DataFields.filter(field=>linkable(item,field.field)).map(field=>({field:field.field,title:field.title||field.field,ftype:field.ftype,type:types[field.ftype],required:field.required===true,...(field.ycsCollection?{ycsCollection:field.ycsCollection,type:'Story list'}:{})})),mapped:item.DataFields.filter(field=>linkable(item,field.field)&&this.sources?.mapping(stageId,item.itemID,field.field,item.relpath)).length }));
   }
   async editor(stageId, graphicId) {
     await this.sources?.ready;
@@ -127,27 +132,26 @@ class Playback extends EventEmitter {
   async mappingPreview(stageId,graphicId,edits=[]) {
     await this.sources?.ready;
     const item=this.repository.item(await this.repository.read(stageId),graphicId);
-    if(!Array.isArray(edits)||edits.length>100||new Set(edits.map(edit=>edit.field)).size!==edits.length)fail('Invalid field mappings');
-    if(edits.some(edit=>!linkable(item,edit.field)))fail('Unknown or protected field',422);
+    edits=prepareEdits(item,edits);
     const graphic=descriptor(item,this.slots);
-    const fields=item.DataFields.filter(field=>linkable(item,field.field)).map(field=>{
+    const fields=await Promise.all(item.DataFields.filter(field=>linkable(item,field.field)).map(async field=>{
       const draft=edits.find(edit=>edit.field===field.field);
       const effective=this.sources.effective(stageId,graphicId,field.field,item.relpath);
       const pick=draft&&draft.scope!=='inherit'?draft.binding:draft?this.sources.document.defaults.find(entry=>entry.stage===stageId&&entry.template===item.relpath&&entry.field===field.field)?.binding||null:effective.binding;
-      let value=String(field.value??''),health='manual',error='';
+      let value=String(field.value??''),health='manual',error='',collection;
       if(pick) {
         try {
           const checked=require('./data.cjs').binding(this.sources.document,pick);
           const connection=this.sources.document.connections[checked.connection||this.sources.document.sources[checked.source]?.binding?.connection];
           if(connection?.project&&connection.project!==this.repository.stage(stageId).project)fail('This source belongs to another project',422);
-          const ref=this.sources.reference(checked), source=this.sources.resolveSnapshot(ref);
+          const ref=this.sources.reference(checked);await this.sources.ensureCollectionHeaders(checked);const source=this.sources.resolveSnapshot(ref);collection=source.collection;
           if(source.value===undefined)throw new Error(source.error||'Waiting for a valid source value');
           value=normalizeField(field,source.value);health=source.health;error=source.error||'';
         }catch(problem){health='error';error=problem.message;}
       }
       graphic.data[field.field]=value;
-      return {field:field.field,title:field.title||field.field,ftype:field.ftype,type:types[field.ftype],required:field.required===true,manual:String(field.value??''),binding:pick,origin:effective.origin,value,health,error};
-    });
+      return {field:field.field,title:field.title||field.field,ftype:field.ftype,type:types[field.ftype],required:field.required===true,...(field.ycsCollection?{ycsCollection:field.ycsCollection,type:'Story list'}:{}),manual:String(field.value??''),binding:pick,origin:effective.origin,value,health,error,...(collection?{collection}:{})};
+    }));
     return {revision:this.sources.snapshot().revision,template:item.relpath,title:item.description||graphicId,graphic,fields};
   }
   command(stageId, graphicId, action, fields, options = {}) {
@@ -165,7 +169,7 @@ class Playback extends EventEmitter {
         fieldValues(checked, fields);
         const links = clone(item.ycsLinks || {});
         for (const [field, link] of Object.entries(options.links || {})) {
-          if (!linkable(item, field) || !link || !['manual', 'linked'].includes(link.mode) || typeof link.manual !== 'string' || link.manual.length > 300) fail('Invalid field link');
+          if (!linkable(item, field) || !link || !['manual', 'linked'].includes(link.mode) || typeof link.manual !== 'string' || link.manual.length > (item.DataFields.find(def=>def.field===field)?.ycsCollection?65536:300)) fail('Invalid field link');
           if (link.mode === 'linked' && !this.sources?.mapping(stageId, graphicId, field, item.relpath)) fail('Assign a source in Data Manager before linking this field', 422);
           links[field] = { mode: link.mode, manual: link.manual };
         }
@@ -175,7 +179,8 @@ class Playback extends EventEmitter {
           if (!link) continue;
           const incoming = fields?.find(candidate => candidate.field === field.field);
           if (link.mode === 'manual' && incoming) link.manual = incoming.value;
-          if (link.manual.length > 300) fail('Linked text must be at most 300 characters');
+          if (link.manual.length > (field.ycsCollection?65536:300)) fail('Manual value exceeds the field limit');
+          if(field.ycsCollection)normalizeField(field,link.manual);
           // The persisted field remains the manual fallback, not a transient
           // source value copied out of the editor's read-only input.
           checked.DataFields.find(candidate => candidate.field === field.field).value = link.manual;
@@ -251,4 +256,4 @@ class Playback extends EventEmitter {
   }
 }
 
-module.exports = { Playback, RundownRepository, fieldValues };
+module.exports = { Playback, RundownRepository, fieldValues, prepareEdits };

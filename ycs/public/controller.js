@@ -62,6 +62,7 @@ if (stage) {
       const problem = incompatible || !source || sourceState?.health !== 'ok' || (source.health && source.health !== 'ok') || source.warning;
       button.classList.toggle('is-warning', linked && Boolean(problem));
       detail.textContent = linked ? `${source?.label || 'Source unavailable'}${problem ? ' · holding last valid value / manual fallback' : ''}` : link.source ? 'Manual override · ' + (source?.label||'unavailable source') : 'Manual · source unassigned';
+      if(source?.collection)detail.textContent+=` · ${source.collection.included} stories, ${source.collection.excluded} unpublished${source.collection.invalid?', '+source.collection.invalid+' invalid':''}`;
       if (changed && row.classList.contains('inFocus')) schedulePreview(row);
     }
     pending(row, model);
@@ -83,7 +84,7 @@ if (stage) {
       const label = document.createElement('label'); input.id ||= `ycs-${row.dataset.spxEpoch}-${field.field}`; label.htmlFor = input.id; label.textContent = field.title || field.field;
       if (field.ftype === 'checkbox') { input.classList.add('ycs-check'); wrapper.append(input, label); }
       else wrapper.append(label, input);
-      (['number', 'filelist', 'textarea'].includes(field.ftype) ? advanced : content).append(wrapper);
+      if(field.ycsCollection){const group=document.createElement('details');group.className='ycs-advanced';const summary=document.createElement('summary');summary.textContent='Stories · manual JSON fallback';group.append(summary,wrapper);content.append(group);}else (['number', 'filelist', 'textarea'].includes(field.ftype) ? advanced : content).append(wrapper);
     }
     if (advanced.children.length === 1) advanced.hidden = true;
     for (const info of row.querySelectorAll('#Expanded td.aright.spxTableHeadsmall')) info.closest('tr').hidden = true;

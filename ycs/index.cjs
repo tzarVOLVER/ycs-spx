@@ -1,7 +1,7 @@
 'use strict';
 const express = require('express');
 const path = require('node:path');
-const { Playback, RundownRepository } = require('./playback.cjs');
+const { Playback, RundownRepository, prepareEdits } = require('./playback.cjs');
 const { DataSources, linkable } = require('./data.cjs');
 const { Renderers } = require('./renderers.cjs');
 
@@ -78,7 +78,7 @@ module.exports = function registerYCS(app, config, hooks = {}) {
   router.post('/data/mappings/:stage/:graphic', handlers(async (req, res) => {
     const { stage, graphic } = req.params, item = repository.item(await repository.read(stage), graphic);
     if (!Array.isArray(req.body.edits) || req.body.edits.some(edit => !linkable(item, edit.field))) return res.status(422).json({ error: 'This field cannot be mapped' });
-    res.json(await sources.saveMappings(stage, graphic, item.relpath, req.body.edits, req.body.revision));
+    res.json(await sources.saveMappings(stage, graphic, item.relpath, prepareEdits(item,req.body.edits), req.body.revision));
   }));
   router.get('/stages', (req, res) => res.json([...repository.stages.values()].map(({ id, title, project, rundown }) => ({ id, title, project, rundown, controller: `/gc/${project}/${rundown}` }))));
   router.get('/stages/:stage/graphics', handlers(async (req, res) => res.json(await playback.catalog(req.params.stage))));

@@ -2,6 +2,7 @@
 const { parseRange, usable } = require('./public-sheets.cjs');
 function fail(message) { const error = new Error(message); error.status = 400; throw error; }
 function selection(input, settings) {
+  if(input?.kind==='collection')return require('./collections.cjs').normalizeSelection(input,settings);
   if (input?.kind === 'json') {
     if(typeof input.pointer !== 'string' || input.pointer.length>2048 || (input.pointer && !/^\/(?:[^~]|~[01])*$/.test(input.pointer))) fail('Select a JSON property');
     return {kind:'json',pointer:input.pointer};
