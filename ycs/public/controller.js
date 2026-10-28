@@ -58,11 +58,14 @@ if (stage) {
       if (linked) showValue(input,value);
       input.readOnly = linked; if(input.type==='checkbox'||input.tagName==='SELECT')input.disabled=linked; input.classList.toggle('ycs-linked-input', linked);
       button.setAttribute('aria-pressed', String(linked)); button.setAttribute('aria-label', linked ? 'Use manual ' + title : 'Link ' + title + ' to data source');
-      button.title = linked ? 'Linked — click to restore manual text' : 'Manual — click to link'; button.classList.toggle('is-linked', linked);
+      button.classList.toggle('is-linked', linked);button.classList.toggle('is-unassigned',!link.source);
       const problem = incompatible || !source || sourceState?.health !== 'ok' || (source.health && source.health !== 'ok') || source.warning;
       button.classList.toggle('is-warning', linked && Boolean(problem));
-      detail.textContent = linked ? `${source?.label || 'Source unavailable'}${problem ? ' · holding last valid value / manual fallback' : ''}` : link.source ? 'Manual override · ' + (source?.label||'unavailable source') : 'Manual · source unassigned';
-      if(source?.collection)detail.textContent+=` · ${source.collection.included} stories, ${source.collection.excluded} unpublished${source.collection.invalid?', '+source.collection.invalid+' invalid':''}`;
+      let description=linked ? `${source?.label || 'Source unavailable'}${problem ? ' · holding last valid value / manual fallback' : ''}` : link.source ? 'Manual override · ' + (source?.label||'unavailable source') : 'Manual · source unassigned';
+      if(source?.collection)description+=` · ${source.collection.included} stories, ${source.collection.excluded} unpublished${source.collection.invalid?', '+source.collection.invalid+' invalid':''}`;
+      if(linked&&problem&&source?.error)description+=' · '+source.error;
+      button.title=description+' · '+(linked?'Click to restore manual value':link.source?'Click to link':'Assign a source in Manage field mappings');input.title=title+' · '+description;
+      detail.textContent=linked&&problem?'Holding last valid value / manual fallback':description;detail.classList.toggle('is-warning',linked&&Boolean(problem));
       if (changed && row.classList.contains('inFocus')) schedulePreview(row);
     }
     pending(row, model);
@@ -73,7 +76,12 @@ if (stage) {
     if (!cell || !editor.fields?.length || editor.fields.some(field => !supported.includes(field.ftype))) return;
     const original = document.createElement('div'); original.hidden = true; original.className = 'ycs-original-fields';
     while (cell.firstChild) original.append(cell.firstChild); cell.append(original);
+    cell.classList.add('ycs-compact-editor');
     const content = document.createElement('div'); content.className = 'ycs-editor-content';
+    const heading=document.createElement('div');heading.className='ycs-editor-heading';const headingTitle=document.createElement('div');headingTitle.className='ycs-editor-title';
+    const nativeTitle=row.querySelector('#Expanded td[colspan="3"].spxTableHeadsmall');
+    if(nativeTitle){while(nativeTitle.firstChild)headingTitle.append(nativeTitle.firstChild);nativeTitle.closest('tr').hidden=true;}else headingTitle.textContent=editor.title||row.dataset.spxEpoch;
+    const toggles=document.createElement('div');toggles.className='ycs-editor-toggles';heading.append(headingTitle,toggles);content.append(heading);
     const advanced = document.createElement('details'); advanced.className = 'ycs-advanced'; advanced.innerHTML = '<summary>Appearance & timing</summary>';
     const badge = document.createElement('span'); badge.className = 'ycs-pending'; badge.hidden = true; model.badge = badge;
     const manager = document.createElement('a'); manager.href = `/ycs/data-manager?stage=${stage}&graphic=${encodeURIComponent(row.dataset.spxEpoch)}`; manager.className = 'ycs-field-mappings'; manager.textContent = 'Manage field mappings ↗';
@@ -81,10 +89,10 @@ if (stage) {
     for (const field of editor.fields) {
       const input = original.querySelector(`[data-update="${field.field}"]`); if (!input || field.ftype === 'hidden') continue;
       const wrapper = document.createElement('div'); wrapper.className = 'ycs-editor-field';
-      const label = document.createElement('label'); input.id ||= `ycs-${row.dataset.spxEpoch}-${field.field}`; label.htmlFor = input.id; label.textContent = field.title || field.field;
-      if (field.ftype === 'checkbox') { input.classList.add('ycs-check'); wrapper.append(input, label); }
+      const label = document.createElement('label'); input.id ||= `ycs-${row.dataset.spxEpoch}-${field.field}`; label.htmlFor = input.id; label.textContent = field.title==='Rounds remaining text'?'Remaining text':field.title || field.field;
+      if (field.ftype === 'checkbox') { input.classList.add('ycs-check');wrapper.classList.add('ycs-checkbox-field');wrapper.append(input, label);toggles.append(wrapper);continue; }
       else wrapper.append(label, input);
-      if(field.ycsCollection){const group=document.createElement('details');group.className='ycs-advanced';const summary=document.createElement('summary');summary.textContent='Stories · manual JSON fallback';group.append(summary,wrapper);content.append(group);}else (['number', 'filelist', 'textarea'].includes(field.ftype) ? advanced : content).append(wrapper);
+      if(field.ycsCollection){const group=document.createElement('details');group.className='ycs-advanced';const summary=document.createElement('summary');summary.textContent=field.title||'Stories';summary.title='Manual JSON fallback. Link this field to use its mapped story list.';group.append(summary,wrapper);content.append(group);}else (['number', 'filelist', 'textarea'].includes(field.ftype) ? advanced : content).append(wrapper);
     }
     if (advanced.children.length === 1) advanced.hidden = true;
     for (const info of row.querySelectorAll('#Expanded td.aright.spxTableHeadsmall')) info.closest('tr').hidden = true;
@@ -101,7 +109,7 @@ if (stage) {
         const container = document.createElement('div'); container.className = 'ycs-link-field'; input.before(container);
         const button = document.createElement('button'); button.type = 'button'; button.className = 'ycs-link-toggle';
         button.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 .1l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7-.1l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
-        const detail = document.createElement('div'); detail.className = 'ycs-link-detail'; container.append(button, input); container.after(detail);
+        const detail = document.createElement('div'); detail.className = 'ycs-link-detail';detail.id=`ycs-link-${id}-${field}`;input.setAttribute('aria-describedby',[input.getAttribute('aria-describedby'),detail.id].filter(Boolean).join(' '));button.setAttribute('aria-describedby',detail.id);container.append(button, input); container.after(detail);
         model.widgets[field] = { input, button, detail, title };
         button.addEventListener('click', event => {
           event.stopPropagation();

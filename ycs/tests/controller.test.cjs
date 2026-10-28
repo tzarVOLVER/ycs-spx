@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
-async function controller(t) {
+async function controller(t, compact = false) {
   const dom = new JSDOM(`<html data-ycs-stage="stage-1"><head></head><body><div id="controllerPluginButtons"></div><iframe id="previewIF"></iframe>
     <div class="itemrow inFocus" data-spx-epoch="ticker"><div class="truncate"></div><div id="Expanded" style="display:block"></div>
     <input data-update="f0" type="hidden" value="broadcast-1"><input data-update="f5" class="gcinput" value="MANUAL ROUND">
@@ -12,6 +12,12 @@ async function controller(t) {
     <button data-spx-name="playbutton" data-spx-playtext="PLAY" data-spx-stoptext="STOP"></button><button data-spx-name="updatebutton" class="disabled">Update</button></div></body></html>`, { url: 'http://localhost/gc/Stage1/Show', runScripts: 'outside-only' });
   const { window } = dom, posts = [], channels = new Map();
   const row = window.document.querySelector('.itemrow');
+  const originalRound=row.querySelector('[data-update="f5"]');
+  if(compact){
+    const expanded=row.querySelector('#Expanded');expanded.innerHTML='<table><tbody><tr><td colspan="3" class="spxTableHeadsmall"><span>YCS TICKER 1</span><i class="l-icon">Edit</i></td></tr><tr><td width="65%"></td><td width="35%"><button onclick="saveTemplateItemChangesByElement(this.closest(\'.itemrow\'))">Save</button></td></tr></tbody></table>';
+    const cell=expanded.querySelector('td[width="65%"]');cell.append(row.querySelector('[data-update="f0"]'),originalRound);
+    for(const [field,type,value]of [['f2','checkbox','1'],['f8','number','145'],['f14','textarea','[]']]){const input=window.document.createElement(type==='textarea'?'textarea':'input');if(type!=='textarea')input.type=type;input.dataset.update=field;input.name=`RundownItem[${field}]`;input.value=value;input.checked=type==='checkbox';input.className='gcinput';cell.append(input);}
+  }
   let revision = 0, closed = 0;
   window.setMasterButtonStates = () => {};
   window.getFocusedRow = () => row;
@@ -23,7 +29,7 @@ async function controller(t) {
       const body = JSON.parse(request.body); posts.push({ url, body });
       const action = url.split('/').at(-1);
       payload = { editorRevision: action === 'stop' ? 99 : action === 'preview' ? revision : ++revision };
-    } else if (url.endsWith('/editor')) payload = { revision, links: { f5: { mode: 'manual', manual: 'MANUAL ROUND' } }, fields: [] };
+    } else if (url.endsWith('/editor')) payload = { revision, links: { f5: { mode: 'manual', manual: 'MANUAL ROUND' },...(compact?{f2:{mode:'manual',manual:'1'}}:{}) }, fields: compact?[{field:'f0',ftype:'hidden',title:'Identity'},{field:'f2',ftype:'checkbox',title:'Show rounds remaining'},{field:'f5',ftype:'textfield',title:'Current round'},{field:'f8',ftype:'number',title:'Crawl speed'},{field:'f14',ftype:'textarea',title:'Stories',ycsCollection:{version:1,fields:[{key:'subtopic'}]}}]:[] };
     else if (url.endsWith('/data')) payload = { health: 'ok', sources: { 'test.round': { label: 'Test round', value: 'LINKED ROUND' } }, mappings: [{ stage: 'stage-1', graphic: 'ticker', field: 'f5', source: 'test.round' }] };
     else if (url.endsWith('/health')) payload = { program: { connected: 0, ready: 0, errors: [] }, preview: { connected: 0, ready: 0, errors: [] } };
     else payload = [];
@@ -33,7 +39,7 @@ async function controller(t) {
   t.after(() => { window.dispatchEvent(new window.Event('pagehide')); window.close(); });
   for (let index = 0; index < 10; index++) await new Promise(resolve => setImmediate(resolve));
   const program = graphics => channels.get('state')({ stage: 'stage-1', mode: 'program', graphics });
-  return { window, row, posts, program, closed: () => closed };
+  return { window, row, posts, program, originalRound, closed: () => closed };
 }
 
 test('native chain previews without Play and program state enables Update and protects active rows', async t => {
@@ -61,4 +67,16 @@ test('native Save closes the editor; Stop does not silently refresh a stale edit
   await r.window.playItem(r.row, 'stop');
   await r.window.updateItem(r.row);
   assert.equal(r.posts.at(-1).body.revision, 1);
+});
+
+test('compact native editor preserves field nodes and values, keeps checkbox editing and link changes off air, and saves all advanced fields',async t=>{
+  const r=await controller(t,true),input=r.row.querySelector('[data-update="f5"]'),checkbox=r.row.querySelector('[data-update="f2"]');
+  assert.equal(input,r.originalRound,'moving labels must not replace native inputs or their handlers');assert.equal(r.posts.length,0);
+  assert.ok(r.row.querySelector('.ycs-editor-heading').contains(checkbox));assert.equal(r.row.querySelector('.ycs-editor-title').textContent,'YCS TICKER 1Edit');
+  const button=input.previousElementSibling,detail=r.window.document.getElementById(input.getAttribute('aria-describedby'));assert.match(button.title,/Test round/);assert.equal(detail.classList.contains('is-warning'),false);
+  checkbox.checked=false;checkbox.dispatchEvent(new r.window.Event('input',{bubbles:true}));button.click();await r.window.previewItem(r.row);
+  assert.equal(input.readOnly,true);assert.ok(r.posts.every(post=>post.url.endsWith('/preview')));
+  assert.equal(r.posts.at(-1).body.links.f2.manual,'0');assert.equal(r.posts.at(-1).body.links.f5.mode,'linked');
+  button.click();await r.window.previewItem(r.row);assert.equal(input.value,'MANUAL ROUND');assert.equal(input.readOnly,false);
+  await r.window.saveTemplateItemChangesByElement(r.row);const saved=r.posts.at(-1);assert.ok(saved.url.endsWith('/save'));assert.deepEqual(saved.body.fields.map(field=>field.field).sort(),['f0','f14','f2','f5','f8']);assert.equal(saved.body.fields.find(field=>field.field==='f2').value,'0');assert.equal(saved.body.fields.find(field=>field.field==='f8').value,'145');assert.equal(saved.body.fields.find(field=>field.field==='f14').value,'[]');assert.equal(r.closed(),1);
 });

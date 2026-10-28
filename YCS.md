@@ -130,6 +130,10 @@ The launcher defaults to the existing `.local/ycs-dev.json`, launches Node hidde
 
 This is a background process for the current Windows session, not an installed Windows service. An explicit launcher command can later be registered with Task Scheduler for login startup; no Windows login settings are changed by these scripts. Restart behavior, account credentials and LAN exposure should be validated on the actual host before venue use.
 
+## Compact native editor
+
+The configured stage rundowns use inline field labels with 29 px text controls and 7 px row spacing. Existing title/edit controls and checkboxes share a wrapping header; only source-linked checkboxes show their link toggle there. Source labels and manual/unassigned descriptions are available through the link/input hover titles and accessible descriptions instead of repeated helper lines. A failed linked source retains its visible warning and manual/last-good fallback message. Appearance/timing and manual story JSON remain collapsed disclosures. The original native input elements, names, handlers, values, manual/linked behavior and explicit Save/Preview/Play/Update paths are preserved. Smaller editors wrap the header and use narrower labels; touch pointers get larger controls. Save pending edits before refreshing a rundown to load the compact layout. No server restart is required for these static editor changes.
+
 ## Program, preview and renderer status
 
 The stage panel identifies **PROGRAM** and the selected **PREVIEW** draft separately. Preview monitor / Program monitor switch only the embedded monitor. They do not take anything on air. Opening a rundown, reading an editor or switching stages never starts program playback. Selecting an item can play it inside preview.
