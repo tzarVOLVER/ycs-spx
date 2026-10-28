@@ -89,3 +89,24 @@ test('navigating an output closes health cleanly even when the browser transport
   r.events()['connect_error']();
   assert.equal(r.reports.at(-1).state, 'closed', 'a disposed output must not re-register as an error renderer');
 });
+
+test('reconnecting retains frames for the same composition and accepts revision zero after a server restart', async t => {
+  const r = await renderer(t);
+  r.events().connect();
+  r.send(50, [r.graphic('ticker')]); await eventually(() => r.root.dataset.revision === '50');
+  const original = r.root.querySelector('iframe'), before = r.calls.length;
+  r.events().disconnect();
+  assert.equal(r.root.querySelector('iframe'), original, 'transport loss holds the visible composition');
+  r.events().connect(); r.send(50, [r.graphic('ticker')]);
+  await eventually(() => r.reports.at(-1)?.state === 'ready');
+  assert.equal(r.root.querySelector('iframe'), original);
+  assert.equal(r.calls.length, before, 'reconnect must not replay Play');
+  r.events().disconnect(); r.events().connect(); r.send(0, []);
+  await eventually(() => r.root.dataset.revision === '0');
+  assert.equal(r.root.querySelectorAll('iframe').length, 0, 'restart clears the retained graphic');
+  r.send(1, [r.graphic('ticker', 'ticker', 'AFTER RESTART')]);
+  await eventually(() => r.root.dataset.revision === '1');
+  assert.equal(r.root.querySelectorAll('iframe').length, 1);
+  r.send(0, []); await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(r.root.dataset.revision, '1', 'older snapshots in the current connection remain rejected');
+});

@@ -112,7 +112,14 @@ async function drain() {
   running = false;
 }
 const events = io('/ycs-playback', { transports: ['websocket'], forceNew: true });
-events.on('connect', () => events.emit('subscribe', { stage, modes: [mode] }));
+events.on('connect', () => {
+  // Revisions are monotonic only within one server connection. A restarted
+  // server starts at zero; its authoritative stopped state must replace the
+  // retained composition. A reconnect to the same server still reuses frames.
+  revision = -1;
+  pending = null;
+  events.emit('subscribe', { stage, modes: [mode] });
+});
 events.on('state', snapshot => {
   if (snapshot.stage !== stage || snapshot.mode !== mode || snapshot.revision < revision) return;
   revision = snapshot.revision;

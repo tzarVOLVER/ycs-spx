@@ -6,6 +6,16 @@ The initial implementation keeps SPX's normal rundown editor and HTML template l
 
 ## Development setup
 
+### Single-computer Orlando rehearsal
+
+From this checkout, run `node ycs/rehearsal.cjs` (or `npm run ycs:rehearsal`) and open **http://127.0.0.1:5661/rehearsal**. No Stream Deck or vMix installation is required. The separate loopback-only process uses the actual ticker templates from the sibling graphics checkout and the existing test lower third. It creates a fresh disposable show under `.local/rehearsals/run-*`; it never reads the development/production configuration, rundowns, real sheet URLs or saved mappings. It adds no routes to the normal SPX server. Port 5660 is explicitly rejected, and occupied ports are not taken over. Optional arguments are `--port 5662` and `--graphics ABSOLUTE_TICKER_FOLDER`.
+
+All three 1920×1080 outputs are scaled into the rehearsal monitor, while their real output URLs remain full resolution. **Run playback checks** exercises stage-specific round values; simultaneous ticker/lower-third slots; manual preview/save versus Update; restoring linked mode; mapped Sheet-range and JSON-array lists with Published/Order/ID and text transforms; held lists during a source outage; output reloads; transport reconnects; and stage-only Stop. It checks the actual output frames as well as API state, including absence of bundled sample stories before the first Play. The three-stage data feeds are deterministic offline adapters; this does not contact Google or an external API, or measure their response latency.
+
+After playback checks, **Test server restart** stops and replaces the rehearsal worker process on the same port while keeping the browser outputs open. The supervisor retains the disposable show's files; the outputs must reconnect and become stopped, with saved mappings/source values retained. Ordinary transport interruption holds graphics until the authoritative snapshot returns, and does not replay Play. Revision comparisons reset on a fresh WebSocket connection so a new server's revision zero can clear a retained composition. **Stop all test outputs** and per-stage controls operate only on the rehearsal show. Ctrl+C in the launcher terminal stops its worker. Closing the browser does not stop the rehearsal process. Each new launcher invocation creates another disposable show; the normal runtime launcher/process record is untouched.
+
+These checks do not replace a later venue LAN, three-PC/vMix, browser performance or physical control-surface rehearsal. The lower third is a test graphic, not an approved broadcast design. Use the normal stage controller and production output URLs for the event.
+
 Use a current Node.js LTS release. Keep the repositories side by side:
 
 ```text
