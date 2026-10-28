@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "booleans": [
+    { "input": true, "checkbox": true, "published": true, "spx": true },
+    { "input": false, "checkbox": false, "published": false, "spx": false },
+    { "input": "1", "checkbox": true, "published": true, "spx": true },
+    { "input": "0", "checkbox": false, "published": false, "spx": false },
+    { "input": 1, "checkbox": true, "published": true, "spx": true },
+    { "input": 0, "checkbox": false, "published": false, "spx": false },
+    { "input": "TRUE", "checkbox": true, "published": true, "spxError": true },
+    { "input": "false", "checkbox": false, "published": false, "spxError": true },
+    { "input": "yes", "checkbox": true, "published": true, "spxError": true },
+    { "input": "off", "checkbox": false, "published": false, "spxError": true },
+    { "input": " true ", "checkboxError": true, "published": true, "spxError": true },
+    { "input": "", "checkboxError": true, "published": false, "spxError": true },
+    { "input": null, "checkboxError": true, "published": false, "spxError": true },
+    { "input": "maybe", "checkboxError": true, "publishedError": true, "spxError": true },
+    { "input": 2, "checkboxError": true, "publishedError": true, "spxError": true }
+  ],
+  "numbers": [
+    { "input": "0145", "value": 145 },
+    { "input": " 12.5 ", "value": 12.5 },
+    { "input": "0", "value": 0 },
+    { "input": "-1", "value": -1 },
+    { "input": 180, "value": 180 },
+    { "input": "", "error": true },
+    { "input": " ", "error": true },
+    { "input": "NaN", "error": true },
+    { "input": "Infinity", "error": true },
+    { "input": true, "error": true },
+    { "input": null, "error": true },
+    { "input": [], "error": true }
+  ],
+  "pointers": [
+    {
+      "data": { "a/b": { "~key": "Unicode ✓" } },
+      "pointer": "/a~1b/~0key",
+      "tokens": ["a/b", "~key"],
+      "value": "Unicode ✓"
+    },
+    { "data": { "": "Empty key" }, "pointer": "/", "tokens": [""], "value": "Empty key" },
+    {
+      "data": [{ "name": "First" }],
+      "pointer": "/0/name",
+      "tokens": ["0", "name"],
+      "value": "First"
+    },
+    { "data": { "root": true }, "pointer": "", "tokens": [], "value": { "root": true } },
+    {
+      "data": { "~1": "Decode once" },
+      "pointer": "/~01",
+      "tokens": ["~1"],
+      "value": "Decode once"
+    },
+    { "data": {}, "pointer": "/toString", "tokens": ["toString"], "missing": true },
+    { "data": { "nil": null }, "pointer": "/nil/name", "tokens": ["nil", "name"], "missing": true },
+    { "data": {}, "pointer": "missing-slash", "error": true },
+    { "data": {}, "pointer": "/bad~2escape", "error": true },
+    { "data": {}, "pointer": "/bad~", "error": true }
+  ],
+  "spxFields": [
+    { "input": { "f2": "0", "f5": "ROUND 1" }, "value": { "f2": "0", "f5": "ROUND 1" } },
+    { "input": { "data": { "f5": "ROUND 2" } }, "value": { "f5": "ROUND 2" } },
+    { "input": "{\"data\":[{\"id\":\"f5\",\"value\":\"ROUND 3\"}]}", "value": { "f5": "ROUND 3" } },
+    { "input": null, "value": {} },
+    { "input": "invalid JSON", "error": true }
+  ],
+  "stories": [
+    {
+      "items": [
+        { "category": "TCG", "topic": "News", "subtopic": "Literal <b>text</b> ✓", "id": "first" }
+      ],
+      "server": [
+        { "category": "TCG", "topic": "News", "subtopic": "Literal <b>text</b> ✓", "id": "first" }
+      ],
+      "ticker": [
+        { "category": "TCG", "topic": "News", "subtopic": "Literal <b>text</b> ✓", "id": "first" }
+      ]
+    },
+    {
+      "items": [{ "subtopic": "Optional headers" }],
+      "server": [{ "subtopic": "Optional headers" }],
+      "ticker": [{ "category": "", "topic": "", "subtopic": "Optional headers" }]
+    },
+    { "items": [], "server": [], "ticker": [] },
+    { "items": [{ "topic": "Missing crawler" }], "error": true },
+    { "items": [{ "subtopic": "   " }], "error": true },
+    {
+      "items": [
+        { "subtopic": "One", "id": "duplicate" },
+        { "subtopic": "Two", "id": "duplicate" }
+      ],
+      "error": true
+    },
+    { "items": [{ "subtopic": 42 }], "error": true }
+  ]
+}

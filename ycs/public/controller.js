@@ -50,10 +50,9 @@ if (stage) {
     model.badge.hidden = !changed; model.badge.textContent = current ? 'Pending · Update on air to apply' : 'Unsaved draft';
   }
   function editorValue(input,value) {
-    const text=String(value);
-    if(input.type==='checkbox'){if(['1','true','yes','on'].includes(text.toLowerCase()))return '1';if(['0','false','no','off'].includes(text.toLowerCase()))return '0';throw new Error('Expected a boolean');}
-    if(input.type==='number'){if(!text.trim()||!Number.isFinite(Number(text)))throw new Error('Expected a number');return String(Number(text));}
-    return text;
+    if(input.type==='checkbox') return YCSDataContract.checkboxValue(value);
+    if(input.type==='number') return String(YCSDataContract.finiteNumber(value));
+    return String(value);
   }
   function showValue(input,value){if(input.type==='checkbox')input.checked=String(value)==='1';else{if(input.tagName==='SELECT'&&![...input.options].some(option=>option.value===String(value))){const option=document.createElement('option');option.value=String(value);option.textContent=String(value);option.dataset.ycsValue='true';input.append(option);}input.value=value;}}
   function manualValue(input){return input.type==='checkbox'?(input.checked?'1':'0'):input.value;}

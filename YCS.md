@@ -223,3 +223,26 @@ Google's query response infers column types and can drop a text header above boo
 **Use mapping** only updates the workspace draft. **Save mapping** saves the binding without changing the rundown or program. Enable Stories' link in the rundown and explicitly Play/Update to commit it; switching to manual restores its saved JSON fallback. Later valid source refreshes update the same template iframe. Visible/entering crawler nodes and their header timing are retained; only the unseen tail is replaced, continuing after the last retained Story ID when available. This avoids restarting the crawl or waiting through old prefetched repetitions. Saving a different mapping stays pending until an explicit Update.
 
 Collection bindings use `{connection, selection: {kind: 'collection', format: 'sheet', range, headerRow, fields: {subtopic: {kind: 'column', name: 'Subtopic'}}, enabled?: {kind: 'column', name: 'Published'}, order?, id?, required: ['subtopic']}}`. JSON uses `format: 'json'`, `pointer` to the array and `{kind: 'property', pointer: '/message'}` selectors relative to each record. Fixed fields use `{kind: 'static', value: 'text'}`; source selectors may include `fallback`. Required keys are enforced by the template on preview/save and playout. Existing cell/row/scalar mappings remain compatible.
+
+
+## Mapping code and shared contracts
+
+Mapping and collection code uses separate modules rather than one dense UI class:
+
+- `mapping-state.js` owns per-graphic drafts, selection tokens, revision acceptance and detached save snapshots. `collection-state.js` owns local story selectors, column/property discovery and per-story transforms.
+- `mapping-api.js` owns request paths and immutable request bodies, including collection previews and cached worksheet metadata. Its injected transport still handles authentication and HTTP errors.
+- `mapping-view.js`, `collection-view.js` and `dom.js` render controls and wire UI events. `mapping-data.js` provides read-only source presentation. Views send edits through their coordinator rather than mutating drafts or requesting data.
+- `mapping-workspace.js` and `collection-editor.js` coordinate selection, preview sequencing, Save and dialog lifecycle. Dialog Cancel stays local; Save remains off air. Global listeners, timers and late preview responses are released or invalidated on disposal.
+
+`data-manager.html` loads these classic scripts in dependency order. The native controller loads `data-contract.js` before its module. Browser tests read the actual HTML dependency list so a missing production script fails the tests.
+
+`ycs/data-contract.cjs` and `ycs/public/data-contract.js` are generated from `ycs-graphics/contracts/data-contract.js`; do not edit the generated copies. Both use `ycs/contracts/fixtures.json` and a SHA-256 manifest. This checkout has no sibling runtime dependency. To update the shared source or fixtures, regenerate from the graphics checkout:
+
+```powershell
+node scripts/sync-data-contracts.mjs --spx ../ycs-spx
+node scripts/sync-data-contracts.mjs --check --spx ../ycs-spx
+```
+
+Commit both repositories together, then run the ticker tests and `node --test ycs/tests/*.test.cjs` here. The fork tests its vendored artifact hashes and browser/Node contract behavior even when the graphics source checkout is absent. See the graphics contract README for the distinct checkbox/Published policies and optional story-header defaults.
+
+Mapping and collection modules use Prettier 3.6.2 with `--single-quote --trailing-comma none --print-width 100`; generated contract artifacts retain generator formatting. Formatting is a development tool, not an application dependency.
