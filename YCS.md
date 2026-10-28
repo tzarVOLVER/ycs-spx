@@ -246,3 +246,18 @@ node scripts/sync-data-contracts.mjs --check --spx ../ycs-spx
 Commit both repositories together, then run the ticker tests and `node --test ycs/tests/*.test.cjs` here. The fork tests its vendored artifact hashes and browser/Node contract behavior even when the graphics source checkout is absent. See the graphics contract README for the distinct checkbox/Published policies and optional story-header defaults.
 
 Mapping and collection modules use Prettier 3.6.2 with `--single-quote --trailing-comma none --print-width 100`; generated contract artifacts retain generator formatting. Formatting is a development tool, not an application dependency.
+
+
+## Local JSON and CSV connections
+
+Data Manager → Add connection → Source type now includes **Local JSON file** and **Local CSV file**. These connections read files on the SPX server, not the operator browser's computer. Place files in the server data folder, click **Refresh files**, choose the filename, test the connection, then save and map its values normally. The picker displays the server folder path. There is no upload or arbitrary filesystem browser.
+
+The folder defaults to `data-sources/` beside the configured rundown data directory (the development show uses `.local/data-sources/`). Set `ycs.localDataRoot` in the server configuration to select another folder, and restart SPX while outputs are stopped. Keep event data outside tracked source folders. Files are read-only to SPX; the data folder is not exposed as a static download directory. Only regular JSON/CSV files directly inside that folder are listed/read; absolute paths, traversal and symlink files are rejected.
+
+JSON exposes the same property/array mapping as JSON API connections. CSV exposes the same cell, table-row, keyed-row and story-list mapping as Sheets. CSV is kept as an addressable grid, with optional header rows chosen separately in each mapping. Comma, semicolon and tab delimiters are supported, including quoted delimiters/newlines and doubled quotes. CSV values remain text; numeric/boolean conversion happens at the mapped field. Source formulas/HTML are not executed.
+
+Files must be UTF-8, up to 1 MB. CSV supports up to 200 rows (including headers), 32 columns and 4000 characters per cell. The connection's CSV mapping bounds are A1:AF200, so adding rows inside these limits does not require changing the connection target. Existing scalar and story-list limits still apply. Linked fields automatically refresh at the configured interval (5–3600 seconds), with coalescing/backoff and restart caches. Invalid, missing or temporarily incomplete files hold their last valid data and display a connection error; valid reads recover automatically. A valid but empty story list intentionally drains the ticker.
+
+Saving a connection or mapping stays off air. Enable the field's link and explicitly Play/Update to commit it; later file refreshes update that committed link automatically. An in-use connection's filename/delimiter is locked; add another connection and remap to change targets. External producers should replace files atomically (write a temporary file in the same folder, then rename it over the target) to avoid exposing a partially written but syntactically valid snapshot.
+
+API: `GET /api/ycs/data/local/files` lists the configured folder and filenames; `POST /api/ycs/data/local/test` accepts `{type:'local-json'|'local-csv',settings:{file,refreshSeconds,delimiter?}}` and previews without saving. Use the existing connection and mapping APIs to save. These endpoints use the existing operator/API authorization and same-origin rules. Configuration stores only a filename, never browser file paths or uploaded contents.

@@ -8,6 +8,7 @@ function modules() {
   const context = vm.createContext({ structuredClone });
   context.window = context;
   for (const file of [
+    'source-types.js',
     'data-contract.js',
     'mapping-data.js',
     'mapping-state.js',

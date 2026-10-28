@@ -34,7 +34,7 @@ window.YCSCollectionDraft = class CollectionDraft {
   }
   configure(connection, binding) {
     const saved = binding?.connection === this.connectionId ? binding.selection : null;
-    this.format = connection.type === 'json-api' ? 'json' : 'sheet';
+    this.format = window.YCSSourceTypes.isJSON(connection) ? 'json' : 'sheet';
     this.pick = {
       kind: 'collection',
       format: this.format,

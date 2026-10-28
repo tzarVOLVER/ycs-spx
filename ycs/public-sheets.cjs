@@ -154,4 +154,4 @@ function parseWorksheets(raw) {
   if (!worksheets.length) fail('Worksheet list unavailable. Check public sharing or enter a tab name/gid manually.', 502);
   return worksheets;
 }
-module.exports = { PublicSheets, normalizeSettings, parseRange, parseResponse, parseWorksheets, endpoint, usable };
+module.exports = { PublicSheets, normalizeSettings, parseRange, parseResponse, parseWorksheets, endpoint, usable, columnName };

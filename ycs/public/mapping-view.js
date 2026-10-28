@@ -73,7 +73,7 @@ window.YCSMappingView = class MappingView {
     this.$('cancel-lookup').onclick = () => this.$('lookup-dialog').close();
     this.$('apply-lookup').onclick = () => {
       const connection = this.workspace.connection();
-      if (!connection || connection.type !== 'google-sheets') return;
+      if (!connection || !window.YCSSourceTypes.isTable(connection)) return;
       this.workspace.assign({
         connection: this.workspace.sourceId,
         selection: {
@@ -170,7 +170,7 @@ window.YCSMappingView = class MappingView {
         this.option(
           select,
           id,
-          connection.label + (connection.type === 'json-api' ? ' · JSON' : '')
+          connection.label + (window.YCSSourceTypes.isJSON(connection) ? ' · JSON' : '')
         );
     for (const [id, source] of Object.entries(state.sources || {}))
       if (source.type === 'local') this.option(select, 'local:' + id, 'Local · ' + source.label);
@@ -187,17 +187,16 @@ window.YCSMappingView = class MappingView {
     const target = this.$('source-context');
     target.replaceChildren();
     const connection = this.workspace.connection();
-    this.$('browse-source').hidden = connection?.type !== 'google-sheets';
-    this.$('source-values-title').textContent =
-      connection?.type === 'json-api'
-        ? 'JSON properties'
-        : this.workspace.tableMode
-          ? 'Columns'
-          : 'Cells / values';
-    if (connection?.type === 'google-sheets') {
+    this.$('browse-source').hidden = !window.YCSSourceTypes.isTable(connection);
+    this.$('source-values-title').textContent = window.YCSSourceTypes.isJSON(connection)
+      ? 'JSON properties'
+      : this.workspace.tableMode
+        ? 'Columns'
+        : 'Cells / values';
+    if (window.YCSSourceTypes.isTable(connection)) {
       const description = this.node(
         'p',
-        `${this.workspace.sheetNames?.[connection.settings.url]?.[connection.settings.worksheet] || connection.settings.worksheet} · ${connection.settings.range}`,
+        `${connection.settings.file || this.workspace.sheetNames?.[connection.settings.url]?.[connection.settings.worksheet] || connection.settings.worksheet} · ${connection.settings.range}`,
         'hint'
       );
       target.append(description);
@@ -229,11 +228,12 @@ window.YCSMappingView = class MappingView {
           target.append(this.fieldLabel(title, input));
         }
       }
-    } else if (connection?.type === 'json-api')
+    } else if (window.YCSSourceTypes.isJSON(connection))
       target.append(
         this.node(
           'p',
-          'Expand a collection to choose a property. Paths are generated automatically.',
+          (connection.settings.file ? connection.settings.file + ' · ' : '') +
+            'Expand a collection to choose a property. Paths are generated automatically.',
           'hint'
         )
       );
@@ -290,7 +290,7 @@ window.YCSMappingView = class MappingView {
         event.dataTransfer.setData('application/x-ycs-binding', JSON.stringify(leaf.binding));
         event.dataTransfer.effectAllowed = 'copy';
       };
-      if (connection?.type === 'json-api' && !search && leaf.path.includes('/')) {
+      if (window.YCSSourceTypes.isJSON(connection) && !search && leaf.path.includes('/')) {
         const groupPath = leaf.path.slice(0, leaf.path.lastIndexOf('/')) || '/';
         let group = groups.get(groupPath);
         if (!group) {
@@ -528,7 +528,7 @@ window.YCSMappingView = class MappingView {
       return;
     }
     const connection = this.workspace.connection();
-    if (!connection || connection.type !== 'google-sheets' || !this.workspace.model) return;
+    if (!connection || !window.YCSSourceTypes.isTable(connection) || !this.workspace.model) return;
     const field = this.workspace.model.fields.find(
       (field) => field.field === this.workspace.selectedField
     );
@@ -568,8 +568,11 @@ window.YCSMappingView = class MappingView {
       this.workspace.message('Use Map story list for collection fields.');
       return;
     }
-    if (!this.workspace.connection() || this.workspace.connection().type !== 'google-sheets') {
-      this.workspace.message('Choose a Google Sheets source for row lookup.');
+    if (
+      !this.workspace.connection() ||
+      !window.YCSSourceTypes.isTable(this.workspace.connection())
+    ) {
+      this.workspace.message('Choose a Google Sheets or CSV source for row lookup.');
       return;
     }
     const field = this.workspace.model.fields.find(

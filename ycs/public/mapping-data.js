@@ -38,7 +38,7 @@ window.YCSMappingData = Object.freeze({
     }
     const connection = state.connections[sourceId];
     if (!connection) return [];
-    if (connection.type === 'json-api') {
+    if (window.YCSSourceTypes.isJSON(connection)) {
       const result = [];
       const walk = (value, path, depth) => {
         if (result.length >= 1500 || depth > 20) return;
