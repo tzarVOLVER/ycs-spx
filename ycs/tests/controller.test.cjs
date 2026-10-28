@@ -107,7 +107,8 @@ async function controller(t, compact = false) {
     return { ok: true, json: async () => payload };
   };
   await require('./helpers/browser.cjs').loadContract(window);
-  window.eval(await fs.readFile(path.join(__dirname, '../public/controller.js'), 'utf8'));
+  window.eval(await fs.readFile(path.join(__dirname, '../public/stage-panel.js'), 'utf8'));
+  window.eval("'use strict';\n" + await fs.readFile(path.join(__dirname, '../public/controller.js'), 'utf8'));
   t.after(() => {
     window.dispatchEvent(new window.Event('pagehide'));
     window.close();

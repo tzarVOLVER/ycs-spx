@@ -170,9 +170,11 @@ The configured stage rundowns use inline field labels with 29 px text controls a
 
 ## Program, preview and renderer status
 
-The stage panel identifies **PROGRAM** and the selected **PREVIEW** draft separately. Preview monitor / Program monitor switch only the embedded monitor. They do not take anything on air. Opening a rundown, reading an editor or switching stages never starts program playback. Selecting an item can play it inside preview.
+The monitor has a yellow **PREVIEW** or red **PROGRAM** header and matching output selector below. Selecting either mode changes only the embedded monitor, preserving the original renderer canvas and scaling. It never takes a graphic on air. Each selector has a separate copy button for its absolute stage-specific output URL, based on the server origin used to open the rundown. Copy does not switch modes. On ordinary LAN HTTP pages it falls back to browser copy support or a selectable URL if clipboard access is blocked. Use the SPX server's LAN hostname/IP when opening the controller if copied URLs will be used on other computers; a localhost URL still refers to the receiving computer itself.
 
-Output pages acknowledge applied snapshots and report template errors. The panel distinguishes no connected renderer, a renderer loading the current state, ready renderers and reported errors. Heartbeats expire after 15 seconds; navigation closes the renderer report when possible. A ready renderer confirms that the browser applied the composition, **not** that vMix has put it on the broadcast. The native global Stop shortcut is scoped to the current configured stage.
+Stage navigation and the output-connections disclosure are omitted from this panel. **Stop stage** remains a stage-scoped panic action; Data Manager remains available in the footer. Program membership is reflected by the program indicator and the existing rundown Play/Stop controls. A controller disconnect shows an unconfirmed-state warning. Successful command/copy messages clear automatically; errors remain visible. Refresh a saved rundown page to load the new panel; no server restart or show migration is needed. Opening a rundown or selecting/copying a monitor never starts program playback. Selecting a rundown item can play it inside preview.
+
+Output pages still acknowledge applied snapshots and report template errors through the existing renderer-health API; these details are not displayed in the compact stage panel. Heartbeats expire after 15 seconds; navigation closes the renderer report when possible. A ready renderer confirms that the browser applied the composition, **not** that vMix has put it on the broadcast. The native global Stop shortcut is scoped to the current configured stage.
 
 ## Display slots
 

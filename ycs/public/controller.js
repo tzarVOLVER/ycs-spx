@@ -3,26 +3,18 @@
 const stage = document.documentElement.dataset.ycsStage;
 if (stage) {
   const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '/ycs/controller.css'; document.head.append(css);
-  const panel = document.createElement('section'); panel.className = 'ycs-stage-panel';
-  panel.innerHTML = `<div class="ycs-panel-heading"><strong class="ycs-heading"></strong><nav class="ycs-stage-links" aria-label="Stages"></nav></div>
-    <div class="ycs-program" role="status">Reading program state…</div>
-    <div class="ycs-actions"><button type="button" data-monitor="preview" aria-pressed="true">Preview</button><button type="button" data-monitor="program" aria-pressed="false">Program</button><a class="ycs-manager-link" href="/ycs/data-manager">Data Manager ↗</a></div>
-    <details class="ycs-output-details"><summary>Output connections</summary><div class="ycs-preview">Reading preview state…</div><div class="ycs-health">Checking connections…</div></details>
-    <button type="button" class="ycs-clear">Stop stage</button><div class="ycs-command-status" role="status"></div>`;
-  panel.querySelector('.ycs-heading').textContent = stage.toUpperCase().replace('-', ' ');
-  document.getElementById('controllerPluginButtons')?.prepend(panel);
-  const message = panel.querySelector('.ycs-command-status');
+  const stagePanel = new window.YCSStagePanel({ stage, onStop: clearStage });
   const models = new Map(), timers = new Map();
   let validationRow;
   const iconMarkup=name=>`<svg class="ycs-editor-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/ycs/editor-icons.svg#${name}"></use></svg>`;
-  let sourceState, active = new Set(), program = new Map(), disposed = false, polling = false, eventsConnected = false;
+  let sourceState, active = new Set(), program = new Map(), disposed = false, polling = false;
   async function request(url, body) {
     const response = await fetch(url, body === undefined ? { cache: 'no-store' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const payload = await response.json();
     if (!response.ok) { const error = new Error(payload.error || 'Stage request failed'); error.fields = payload.fields; throw error; }
     return payload;
   }
-  function notify(text, error = false) { message.textContent = text; message.classList.toggle('ycs-error', error); }
+  function notify(text, error = false) { stagePanel.notify(text, error); }
   function fieldErrors(row, errors = {}) {
     for (const input of row.querySelectorAll('[data-update]')) {
       const id = `ycs-error-${row.dataset.spxEpoch}-${input.dataset.update}`;
@@ -200,17 +192,6 @@ if (stage) {
     catch (error) { notify(error.message, true); }
   }
   window.stopAll = clearStage;
-  panel.querySelector('.ycs-clear').addEventListener('click', clearStage);
-  for (const button of panel.querySelectorAll('[data-monitor]')) button.addEventListener('click', () => {
-    document.getElementById('previewIF').src = `/output/${stage}/${button.dataset.monitor}`;
-    for (const other of panel.querySelectorAll('[data-monitor]')) other.setAttribute('aria-pressed', String(other === button));
-  });
-  request('/api/ycs/stages').then(stages => {
-    for (const item of stages) {
-      const link = document.createElement('a'); link.href = item.controller; link.textContent = item.title;
-      if (item.id === stage) link.setAttribute('aria-current', 'page'); panel.querySelector('.ycs-stage-links').append(link);
-    }
-  }).catch(error => notify(error.message, true));
   function syncButtons(snapshot) {
     active = new Set(snapshot.graphics.map(item => item.id));
     program = new Map(snapshot.graphics.map(item => [item.id, item]));
@@ -227,44 +208,34 @@ if (stage) {
       }
     }
     const selected = document.querySelector('.itemrow.inFocus'); if (selected) window.setMasterButtonStates?.(selected);
-    panel.querySelector('.ycs-program').textContent = snapshot.graphics.length ? 'PROGRAM · ' + snapshot.graphics.length + ' active · ' + snapshot.graphics.map(item => item.slot).join(', ') : 'PROGRAM · Stopped';
+    stagePanel.setProgram(snapshot);
   }
   const stageEvents = io('/ycs-playback', { transports: ['websocket'], forceNew: true });
   stageEvents.on('connect', () => stageEvents.emit('subscribe', { stage, modes: ['program', 'preview'] }));
   stageEvents.on('state', snapshot => {
     if (snapshot.stage !== stage) return;
-    eventsConnected = true;
     if (snapshot.mode === 'program') syncButtons(snapshot);
-    else if (snapshot.mode === 'preview') panel.querySelector('.ycs-preview').textContent = snapshot.selected ? `PREVIEW · ${snapshot.selected} draft` : 'PREVIEW · Follows program';
+    else if (snapshot.mode === 'preview') stagePanel.setPreview(snapshot);
   });
   function disconnected() {
     if (disposed) return;
-    eventsConnected = false; panel.querySelector('.ycs-program').textContent = 'PROGRAM · Connection lost — state unconfirmed';
-    panel.querySelector('.ycs-preview').textContent = 'PREVIEW · Reconnecting';
+    stagePanel.setConnected(false);
   }
   stageEvents.on('disconnect', disconnected); stageEvents.on('connect_error', disconnected);
   stageEvents.on('stage-error', error => notify(error.error, true));
   async function poll() {
     if (polling || disposed) return; polling = true;
     try {
-      const [data, health] = await Promise.all([request('/api/ycs/data'), request(`/api/ycs/stages/${stage}/health`)]); sourceState = data;
+      sourceState = await request('/api/ycs/data');
+      stagePanel.setDataAvailable(sourceState.health === 'ok');
       for (const row of document.querySelectorAll('.itemrow')) { const model = models.get(row.dataset.spxEpoch); if (model?.widgets) paintLink(row, model); }
-      const lines = ['program', 'preview'].map(mode => {
-        const state = health[mode];
-        return `${mode}: ${state.errors.length ? state.errors.join('; ') : !state.connected ? 'no renderer connected' : state.ready ? `${state.ready} renderer(s) ready` : 'loading current state'}`;
-      });
-      const target = panel.querySelector('.ycs-health'); target.textContent = lines.join(' · ');
-      const problem = !eventsConnected || health.program.errors.length > 0 || (active.size > 0 && !health.program.connected);
-      target.classList.toggle('ycs-error', problem);
-      panel.querySelector('.ycs-output-details summary').textContent = problem ? 'Output connections · Needs attention' : 'Output connections';
-      panel.querySelector('.ycs-output-details summary').classList.toggle('ycs-error', problem);
-    } catch { panel.querySelector('.ycs-health').textContent = 'Output/data status unavailable — reconnecting'; }
+    } catch { stagePanel.setDataAvailable(false); }
     finally { polling = false; }
   }
   poll(); const pollTimer = setInterval(poll, 1500);
   const options = document.getElementById('renderOptionsFoldable'); if (options) options.hidden = true;
   window.addEventListener('pagehide', () => {
-    disposed = true; clearInterval(pollTimer); for (const timer of timers.values()) clearTimeout(timer);
+    disposed = true; stagePanel.dispose(); clearInterval(pollTimer); for (const timer of timers.values()) clearTimeout(timer);
     try { stageEvents.disconnect(); } catch { /* Transport may already be closed during navigation. */ }
   }, { once: true });
 }

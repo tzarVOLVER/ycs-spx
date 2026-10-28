@@ -1,5 +1,47 @@
-.ycs-stage-panel{padding:14px;background:#26343f;color:#e2eaf0;font:13px/1.5 system-ui,sans-serif;border:1px solid #4b5d6b;border-radius:6px}
-#controllerPluginButtons>:not(.ycs-stage-panel){display:none!important}.ycs-panel-heading{display:flex;justify-content:space-between;gap:12px;align-items:center}.ycs-heading{font-size:14px;white-space:nowrap}.ycs-stage-links{display:flex;gap:10px}.ycs-stage-panel a{color:#f0cc55}.ycs-stage-links a[aria-current]{font-weight:bold}.ycs-program{margin:10px 0;color:#e5edf3}.ycs-health,.ycs-preview{color:#becbd5;font-size:11px;margin-top:5px}.ycs-error{color:#ffd180!important}.ycs-actions{display:flex;align-items:center;gap:6px;margin:10px 0}.ycs-actions button{background:#192833;border:1px solid #596c7d;border-radius:4px;color:#e2eaf0;padding:6px 10px;cursor:pointer}.ycs-actions button[aria-pressed=true]{border-color:#f0cc55;color:#f0cc55}.ycs-manager-link{margin-left:auto;font-size:12px}.ycs-output-details{font-size:11px;color:#b5c5d0;cursor:pointer}.ycs-clear{margin-top:12px;padding:6px 12px;background:#482d36;color:#ffc2ca;border:1px solid #865360;border-radius:4px;cursor:pointer}.ycs-command-status{margin-top:6px;font-size:12px}.ycs-command-status:empty{display:none}/* Compact inline labels in the native rundown editor. */
+/* Monitor frame and stage controls; the renderer keeps its original canvas size. */
+.ycs-monitor-shell{--ycs-monitor-accent:#f4ca44;--ycs-monitor-ink:#17222b;width:100%;border-radius:6px;box-shadow:0 0 0 2px var(--ycs-monitor-accent);overflow:hidden;margin:2px 0 18px}
+.ycs-monitor-shell[data-mode="program"]{--ycs-monitor-accent:#e86b73;--ycs-monitor-ink:#211419}
+.ycs-monitor-label{display:flex;align-items:center;gap:8px;min-height:30px;box-sizing:border-box;padding:6px 11px;background:var(--ycs-monitor-accent);color:var(--ycs-monitor-ink);font:750 12px/1.4 system-ui,sans-serif;letter-spacing:1.5px;text-transform:uppercase}
+.ycs-monitor-shell #previewBG{max-width:100%;margin:0}
+.ycs-preview-ruler{height:0!important;border:0!important;margin:0!important}
+.ycs-monitor-shell #LocalRendererDisabledNotification{pointer-events:none}
+.ycs-stage-panel{padding:17px 18px 15px;background:#26343f;color:#e2eaf0;font:13px/1.5 system-ui,sans-serif;border:1px solid #4b5d6b;border-radius:7px;box-sizing:border-box}
+#controllerPluginButtons>:not(.ycs-stage-panel){display:none!important}
+.ycs-heading{display:block;margin:0 0 14px;font-size:14px;letter-spacing:.3px}
+.ycs-output-label{display:block;margin-bottom:7px;color:#becbd5;font-size:10px;letter-spacing:1.5px;text-transform:uppercase}
+.ycs-output-options{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ycs-output-choice{display:flex;min-width:0;background:#1e2d37;border:1px solid #526876;border-radius:6px;box-shadow:0 0 0 1px #52687633;overflow:hidden}
+.ycs-output-choice button{appearance:none;background:transparent;color:#e2eaf0;border:0;border-radius:0;margin:0;padding:0;cursor:pointer;font:650 13px/1.4 system-ui,sans-serif;box-sizing:border-box}
+.ycs-output-select{display:flex;align-items:center;gap:10px;min-width:0;flex:1;min-height:49px;padding:10px 13px!important;text-align:left}
+.ycs-output-dot{flex:0 0 10px;width:10px;height:10px;border:2px solid #e1b83c;border-radius:50%;box-sizing:border-box}
+[data-output="program"] .ycs-output-dot{border-color:#ec737b}
+[data-output="program"].is-active .ycs-output-dot{background:#ec737b}
+.ycs-output-choice.is-selected{border-color:#f4ca44;box-shadow:0 0 0 1px #f4ca44;background:#f4ca4422}
+.ycs-output-choice.is-selected button{color:#f4ca44}
+.ycs-output-choice.is-selected .ycs-output-dot{background:#f4ca44;border-color:#f4ca44}
+[data-output="program"].is-selected{border-color:#e86b73;box-shadow:0 0 0 1px #e86b73;background:#e86b7320}
+[data-output="program"].is-selected button{color:#ff9ba3}
+[data-output="program"].is-selected .ycs-output-dot{border-color:#ff9ba3;background:transparent}
+[data-output="program"].is-selected.is-active .ycs-output-dot{background:#ff9ba3}
+.ycs-copy-output{display:inline-flex;align-items:center;justify-content:center;flex:0 0 45px;border-left:1px solid #526876!important}
+.ycs-output-choice.is-selected .ycs-copy-output{border-left-color:#f4ca4455!important}
+[data-output="program"].is-selected .ycs-copy-output{border-left-color:#e86b7355!important}
+.ycs-output-choice button:hover{background:#ffffff09}
+.ycs-output-choice button:focus-visible,.ycs-clear:focus-visible,.ycs-manager-link:focus-visible{outline:2px solid #d2e8f5;outline-offset:-4px}
+.ycs-panel-icon{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;pointer-events:none;flex-shrink:0}
+.ycs-panel-footer{display:flex;align-items:center;gap:12px;margin-top:18px;padding-top:15px;border-top:1px solid #41535f}
+.ycs-clear{display:inline-flex;align-items:center;gap:6px;margin:0;padding:8px 12px;background:#532f39;color:#ffd5db;border:1px solid #865360;border-radius:5px;cursor:pointer;font:600 12px/1.4 system-ui,sans-serif}
+.ycs-clear:hover{background:#673642}.ycs-clear:disabled{opacity:.6;cursor:wait}
+.ycs-clear .ycs-panel-icon{width:13px;height:13px}
+.ycs-manager-link{margin-left:auto;font-size:11px;color:#c4d4df;text-decoration:none}
+.ycs-manager-link:hover{color:#f4ca44}
+.ycs-copy-status,.ycs-command-status,.ycs-connection-status{margin-top:8px;font-size:12px;color:#c5d7e3;overflow-wrap:anywhere}
+.ycs-copy-status:empty,.ycs-command-status:empty{display:none}
+.ycs-error,.ycs-connection-status{color:#ffd180!important}
+.ycs-copy-fallback{width:100%;box-sizing:border-box;margin-top:7px;padding:7px;background:#1e2d37;color:#e2eaf0;border:1px solid #8095a3;border-radius:3px;font:12px/1.4 monospace}
+.ycs-stage-panel [hidden]{display:none!important}
+@media(max-width:420px){.ycs-stage-panel{padding:14px 12px}.ycs-output-options{gap:7px}.ycs-output-select{padding:9px!important;gap:7px}.ycs-copy-output{flex-basis:36px}}
+/* Compact inline labels in the native rundown editor. */
 .ycs-compact-editor{padding:12px 14px 10px!important;background:#26333c;border:1px solid #43525d;border-radius:4px;box-sizing:border-box}
 .ycs-editor-content{padding-top:0;container-type:inline-size}
 .ycs-editor-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;min-height:24px}
