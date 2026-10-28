@@ -52,3 +52,14 @@ test('JSON playlists use the same typed preview and commit path, and invalid req
  let preview=await base.playback.mappingPreview('stage-1','ticker',edits);assert.equal(JSON.parse(preview.graphic.data.f14)[0].subtopic,'API story');
  data={feed:[{live:true,heading:'Missing message'}]};await sources.refreshSheet(connectionId);preview=await base.playback.mappingPreview('stage-1','ticker',edits);assert.equal(preview.fields.find(field=>field.field==='f14').collection.invalid,1);assert.match(preview.fields.find(field=>field.field==='f14').error,/invalid/);
 });
+test('story text transforms apply to sheet, JSON, fixed and fallback values before validation without changing source data or IDs',()=>{
+ const input=structuredClone(sheetPick);input.fields.category.transform={kind:'uppercase'};input.fields.topic.transform={kind:'lowercase'};input.fields.subtopic.transform={kind:'prefix',value:'NEWS: '};const data=rows(values),before=structuredClone(data),result=resolveCollection(data,normalizeSelection(input,sheetSettings));
+ assert.deepEqual(result.items[0],{category:'GAMES',topic:'match',subtopic:'NEWS: First',id:'first'});assert.deepEqual(data,before);assert.equal(result.excluded,1);
+ const json={kind:'collection',format:'json',pointer:'',fields:{category:{kind:'static',value:'ycs',transform:{kind:'uppercase'}},topic:{kind:'property',pointer:'/missing',fallback:'Event News',transform:{kind:'lowercase'}},subtopic:{kind:'property',pointer:'/message',transform:{kind:'uppercase'}}},id:{kind:'property',pointer:'/id'},required:['subtopic']};
+ const record=[{message:'Mixed Case',id:'keepMixedCase'}];assert.deepEqual(resolveCollection(record,normalizeSelection(json,{})).items,[{category:'YCS',topic:'event news',subtopic:'MIXED CASE',id:'keepMixedCase'}]);assert.equal(record[0].message,'Mixed Case');
+ json.fields.subtopic.transform={kind:'trim'};assert.equal(resolveCollection([{message:'  ',id:'empty'}],normalizeSelection(json,{})).invalid,1);
+ json.fields.subtopic.transform={kind:'uppercase'};assert.equal(resolveCollection([{message:'ß'.repeat(4000),id:'expanded'}],normalizeSelection(json,{})).invalid,1,'expanded text is checked after transformation');
+ json.fields.subtopic.transform={kind:'unsupported'};assert.throws(()=>normalizeSelection(json,{}),/Unsupported transform/);
+ json.fields.subtopic.transform={kind:'prefix',value:'x'.repeat(201)};assert.throws(()=>normalizeSelection(json,{}),/prefix/);
+ input.id.transform={kind:'uppercase'};assert.throws(()=>normalizeSelection(input,sheetSettings),/only to story text/);
+});

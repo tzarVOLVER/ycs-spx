@@ -1,6 +1,7 @@
 'use strict';
 // Collection selectors describe records, not a particular ticker or sheet layout.
 const {parseRange}=require('./public-sheets.cjs');
+const {transform,normalizeTransform}=require('./bindings.cjs');
 const LIMIT=65536, MAX_ITEMS=200;
 const safeKey=key=>typeof key==='string'&&/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(key)&&!['constructor','prototype','__proto__'].includes(key);
 function fail(message){const error=new Error(message);error.status=400;throw error;}
@@ -18,15 +19,17 @@ function normalizeSelection(input,settings){
     Object.assign(result,{range:range.a1,headerRow});
   }else result.pointer=pointer(input.pointer);
   if(!input.fields||Array.isArray(input.fields)||typeof input.fields!=='object'||!Object.keys(input.fields).length||Object.keys(input.fields).length>20)fail('Map at least one story field');
-  function pick(value){
+  function pick(value,content=false){
     if(!value||typeof value!=='object'||Array.isArray(value))fail('Choose a story property');
-    if(value.kind==='static')return {kind:'static',value:scalar(value.value)};
-    const extra=value.fallback===undefined?{}:{fallback:scalar(value.fallback)};
+    if(!content&&value.transform&&value.transform.kind!=='none')fail('Text transforms apply only to story text fields');
+    const change=content?normalizeTransform(value.transform):undefined;
+    const extra={...(change?{transform:change}:{}),...(value.fallback===undefined?{}:{fallback:scalar(value.fallback)})};
+    if(value.kind==='static')return {kind:'static',value:scalar(value.value),...(change?{transform:change}:{})};
     if(input.format==='sheet'&&value.kind==='column'&&typeof value.name==='string'&&value.name.trim()&&value.name.length<=300)return {kind:'column',name:value.name,...extra};
     if(input.format==='json'&&value.kind==='property')return {kind:'property',pointer:pointer(value.pointer),...extra};
     fail('Choose a compatible column or JSON property');
   }
-  result.fields={};for(const [key,value]of Object.entries(input.fields)){if(!safeKey(key)||key==='id')fail('Invalid story field');result.fields[key]=pick(value);}
+  result.fields={};for(const [key,value]of Object.entries(input.fields)){if(!safeKey(key)||key==='id')fail('Invalid story field');result.fields[key]=pick(value,true);}
   result.required=Array.isArray(input.required)?input.required:[];
   if(result.required.some(key=>!safeKey(key))||result.required.length>20)fail('Invalid required story fields');
   for(const key of ['enabled','order','id'])if(input[key])result[key]=pick(input[key]);
@@ -49,14 +52,15 @@ function resolveCollection(data,pick){
     read=(row,ref)=>ref.kind==='static'?ref.value:at(row,ref.pointer);location=(_,index)=>'Item '+(index+1);
   }
   const get=read;read=(record,ref)=>{const value=get(record,ref);return value===undefined||value===null||value===''?ref.fallback??value:value;};
+  const textValue=(record,ref)=>scalar(transform(scalar(read(record,ref)),ref.transform));
   if(records.length>MAX_ITEMS)throw new Error('Use a playlist of at most '+MAX_ITEMS+' stories');
   const rows=[],valid=[],ids=new Set();
   for(const [index,record]of records.entries()){
     const detail={location:location(record,index),status:'included',values:{}};rows.push(detail);
     try{
       if(pick.format==='sheet'&&record.every(cell=>!String(cell.value??'').trim())){detail.status='blank';continue;}
-      if(pick.enabled&&!boolean(read(record,pick.enabled))){detail.status='excluded';for(const [key,ref]of Object.entries(pick.fields)){try{detail.values[key]=scalar(read(record,ref));}catch{detail.values[key]='';}}continue;}
-      for(const [key,ref]of Object.entries(pick.fields))detail.values[key]=scalar(read(record,ref));
+      if(pick.enabled&&!boolean(read(record,pick.enabled))){detail.status='excluded';for(const [key,ref]of Object.entries(pick.fields)){try{detail.values[key]=textValue(record,ref);}catch{detail.values[key]='';}}continue;}
+      for(const [key,ref]of Object.entries(pick.fields))detail.values[key]=textValue(record,ref);
       for(const key of pick.required)if(!detail.values[key]?.trim())throw new Error('Missing required story field: '+key);
       if(pick.id){const id=scalar(read(record,pick.id),200).trim();if(!id)throw new Error('Story ID is empty');if(ids.has(id))throw new Error('Duplicate Story ID: '+id);ids.add(id);detail.values.id=id;}
       const order=pick.order?scalar(read(record,pick.order),100):String(index);
