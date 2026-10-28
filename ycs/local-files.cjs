@@ -15,12 +15,42 @@ function localFileType(name) {
     fail('Choose a JSON or CSV filename from the SPX data folder');
   return name.toLowerCase().endsWith('.json') ? 'local-json' : 'local-csv';
 }
+function relativePath(value, { directory = false } = {}) {
+  if (typeof value !== 'string' || value.length > 1024 || (!value && !directory))
+    fail('Enter a path within the selected server location');
+  const normalized = value.replace(/\\/g, '/');
+  if (!normalized && directory) return '';
+  const parts = normalized.split('/');
+  if (
+    parts.some(
+      (part) =>
+        !part ||
+        part === '.' ||
+        part === '..' ||
+        /[<>:"|?*\u0000-\u001f]/.test(part) ||
+        /[. ]$/.test(part) ||
+        /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part)
+    )
+  )
+    fail(
+      'Use a relative path inside the selected server location; parent paths and drive names are not accepted'
+    );
+  return parts.join('/');
+}
+function locationId(value = 'default') {
+  if (typeof value !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(value))
+    fail('Choose a configured server location');
+  return value;
+}
 function normalizeLocalSettings(input, type) {
-  if (localFileType(input?.file) !== type) fail('The selected file does not match the source type');
-  const refreshSeconds = Number(input.refreshSeconds);
+  const file = relativePath(input?.file);
+  if (localFileType(file.split('/').pop()) !== type)
+    fail('The selected file does not match the source type');
+  const location = locationId(input.location),
+    refreshSeconds = Number(input.refreshSeconds);
   if (!Number.isInteger(refreshSeconds) || refreshSeconds < 5 || refreshSeconds > 3600)
     fail('Refresh interval must be 5–3600 seconds');
-  const settings = { file: input.file, refreshSeconds };
+  const settings = { file, refreshSeconds, ...(location === 'default' ? {} : { location }) };
   if (type === 'local-csv') {
     const delimiter = input.delimiter ?? ',';
     if (![',', ';', '\t'].includes(delimiter)) fail('Choose a comma, semicolon or tab delimiter');
@@ -93,47 +123,208 @@ function parseCSV(raw, delimiter = ',') {
 }
 
 class LocalFiles {
-  constructor(root) {
+  constructor(root, { locations = [], timeoutMs = 5000, io = fs } = {}) {
     this.root = path.resolve(root);
+    this.io = io;
+    this.timeoutMs = timeoutMs;
+    this.jobs = new Map();
+    if (!Array.isArray(locations) || locations.length > 20)
+      fail('Configure up to 20 additional server data locations');
+    this.locations = new Map([
+      ['default', { id: 'default', label: 'Local data', path: this.root }]
+    ]);
+    for (const input of locations) {
+      const id = locationId(input?.id);
+      if (
+        this.locations.has(id) ||
+        typeof input.label !== 'string' ||
+        !input.label.trim() ||
+        input.label.length > 100 ||
+        typeof input.path !== 'string' ||
+        !path.isAbsolute(input.path) ||
+        input.path.length > 2048 ||
+        /\u0000/.test(input.path)
+      )
+        fail('Invalid server data location configuration');
+      this.locations.set(id, { id, label: input.label.trim(), path: path.resolve(input.path) });
+    }
+  }
+  describe() {
+    return { locations: [...this.locations.values()].map((location) => ({ ...location })) };
+  }
+  location(id = 'default') {
+    const value = this.locations.get(locationId(id));
+    if (!value) fail('Unknown server data location');
+    return value;
+  }
+  // OS network operations cannot always be cancelled. Keep one job per target
+  // until it settles, even after its response times out, rather than piling up I/O.
+  bounded(key, operation, { signal } = {}) {
+    signal?.throwIfAborted();
+    let job = this.jobs.get(key);
+    if (!job) {
+      const controller = new AbortController();
+      job = {};
+      this.jobs.set(key, job);
+      const work = Promise.resolve().then(() => operation(controller.signal));
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          const error = new Error('Server file location timed out; check the network connection');
+          error.status = 504;
+          reject(error);
+        }, this.timeoutMs);
+        timer.unref?.();
+      });
+      job.result = Promise.race([work, timeout]);
+      const done = () => {
+        clearTimeout(timer);
+        if (this.jobs.get(key) === job) this.jobs.delete(key);
+      };
+      work.then(done, done);
+    }
+    if (!signal) return job.result;
+    return new Promise((resolve, reject) => {
+      const abort = () => reject(signal.reason || new Error('File request cancelled'));
+      signal.addEventListener('abort', abort, { once: true });
+      job.result.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    });
+  }
+  async directory(location, relative, signal) {
+    signal.throwIfAborted();
+    if (location.id === 'default' && !location.path.startsWith('\\\\'))
+      await this.io.mkdir(location.path, { recursive: true });
+    signal.throwIfAborted();
+    const root = await this.io.realpath(location.path);
+    signal.throwIfAborted();
+    let folder = root;
+    for (const part of relative ? relative.split('/') : []) {
+      signal.throwIfAborted();
+      folder = path.join(folder, part);
+      const stat = await this.io.lstat(folder);
+      signal.throwIfAborted();
+      if (!stat.isDirectory() || stat.isSymbolicLink())
+        fail('Choose a regular folder inside the selected location');
+    }
+    const resolved = relative ? await this.io.realpath(folder) : root,
+      inside = path.relative(root, resolved);
+    if (inside === '..' || inside.startsWith('..' + path.sep) || path.isAbsolute(inside))
+      fail('Folder must stay inside the selected location');
+    signal.throwIfAborted();
+    return { root, folder: resolved };
+  }
+  async browse({ location = 'default', directory = '', type } = {}, options = {}) {
+    const selected = this.location(location),
+      relative = relativePath(directory, { directory: true });
+    if (type !== undefined && !['local-json', 'local-csv'].includes(type))
+      fail('Choose a JSON or CSV source type');
+    return this.bounded(
+      'browse:' + selected.id + ':' + relative + ':' + (type || ''),
+      async (signal) => {
+        try {
+          const { folder } = await this.directory(selected, relative, signal),
+            items = await this.io.readdir(folder, { withFileTypes: true });
+          signal.throwIfAborted();
+          if (items.length > 10000)
+            fail('This folder is too large to browse; enter a narrower folder path');
+          const entries = [];
+          for (const entry of items) {
+            if (entry.isSymbolicLink()) continue;
+            const file = relative ? relative + '/' + entry.name : entry.name;
+            try {
+              relativePath(file);
+              if (entry.isDirectory())
+                entries.push({ name: entry.name, path: file, kind: 'directory' });
+              else if (entry.isFile()) {
+                const fileType = localFileType(entry.name);
+                if (!type || fileType === type)
+                  entries.push({ name: entry.name, path: file, kind: 'file', type: fileType });
+              }
+            } catch {
+              /* Unsupported names and non-data files are omitted. */
+            }
+          }
+          entries.sort(
+            (a, b) =>
+              (a.kind === b.kind ? 0 : a.kind === 'directory' ? -1 : 1) ||
+              a.name.localeCompare(b.name)
+          );
+          return {
+            location: selected.id,
+            label: selected.label,
+            root: selected.path,
+            directory: relative,
+            folder,
+            entries: entries.slice(0, 500),
+            truncated: entries.length > 500
+          };
+        } catch (error) {
+          if (error.status || signal.aborted) throw error;
+          fail(
+            'Server folder is unavailable; check its path, network and Windows access permissions',
+            422
+          );
+        }
+      },
+      options
+    );
   }
   async list() {
-    await fs.mkdir(this.root, { recursive: true });
-    const files = [];
-    for (const entry of await fs.readdir(this.root, { withFileTypes: true })) {
-      if (!entry.isFile()) continue;
-      try {
-        files.push({ name: entry.name, type: localFileType(entry.name) });
-      } catch {
-        /* Only explicitly supported data files are offered. */
-      }
-    }
-    return { folder: this.root, files: files.sort((a, b) => a.name.localeCompare(b.name)) };
+    const result = await this.browse();
+    return {
+      folder: this.root,
+      files: result.entries
+        .filter((entry) => entry.kind === 'file')
+        .map((entry) => ({ name: entry.name, type: entry.type }))
+    };
   }
-  async read(input, { signal, type = localFileType(input?.file) } = {}) {
-    const settings = normalizeLocalSettings(input, type);
+  async read(input, { signal, type } = {}) {
+    type ||= localFileType(relativePath(input?.file).split('/').pop());
+    const settings = normalizeLocalSettings(input, type),
+      location = this.location(settings.location);
+    return this.bounded(
+      'read:' + location.id + ':' + JSON.stringify(settings),
+      (signal) => this.readFile(settings, type, location, signal),
+      { signal }
+    );
+  }
+  async readFile(settings, type, location, signal) {
     let file;
     try {
-      signal?.throwIfAborted();
-      const root = await fs.realpath(this.root),
-        candidate = path.join(root, settings.file);
-      const link = await fs.lstat(candidate);
+      const parts = settings.file.split('/'),
+        name = parts.pop(),
+        { root, folder } = await this.directory(location, parts.join('/'), signal),
+        candidate = path.join(folder, name);
+      const link = await this.io.lstat(candidate);
+      signal.throwIfAborted();
       if (!link.isFile() || link.isSymbolicLink())
-        fail('Select a regular data file inside the SPX data folder');
-      const resolved = await fs.realpath(candidate);
-      if (path.dirname(resolved) !== root) fail('Data file must stay inside the SPX data folder');
-      file = await fs.open(resolved, 'r');
+        fail('Select a regular data file inside the server location');
+      const resolved = await this.io.realpath(candidate),
+        inside = path.relative(root, resolved);
+      if (
+        path.dirname(resolved) !== folder ||
+        inside === '..' ||
+        inside.startsWith('..' + path.sep) ||
+        path.isAbsolute(inside)
+      )
+        fail('Data file must stay inside the selected location');
+      signal.throwIfAborted();
+      file = await this.io.open(resolved, 'r');
+      signal.throwIfAborted();
       const stat = await file.stat();
+      signal.throwIfAborted();
       if (!stat.isFile() || stat.size > MAX_BYTES)
         fail('Local files must be regular files up to 1 MB');
-      // A bounded read also handles a file growing while another application writes it.
       const bytes = Buffer.alloc(MAX_BYTES + 1);
       let size = 0;
       while (size < bytes.length) {
-        signal?.throwIfAborted();
+        signal.throwIfAborted();
         const result = await file.read(bytes, size, bytes.length - size, null);
         if (!result.bytesRead) break;
         size += result.bytesRead;
       }
+      signal.throwIfAborted();
       if (size > MAX_BYTES) fail('Local files must be up to 1 MB');
       let raw;
       try {
@@ -153,8 +344,11 @@ class LocalFiles {
       const rows = parseCSV(raw, settings.delimiter);
       return { settings, rows, headerRows: rows.map((_, index) => index + 1) };
     } catch (error) {
-      if (error.status || signal?.aborted) throw error;
-      fail('Local file is unavailable; check that it exists in the SPX data folder', 422);
+      if (error.status || signal.aborted) throw error;
+      fail(
+        'Server file is unavailable; check its path, network and Windows access permissions',
+        422
+      );
     } finally {
       await file?.close();
     }
@@ -166,5 +360,6 @@ module.exports = {
   parseCSV,
   localFileType,
   MAX_BYTES,
-  TABLE_RANGE
+  TABLE_RANGE,
+  relativePath
 };

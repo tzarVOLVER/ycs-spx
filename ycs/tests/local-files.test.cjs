@@ -63,7 +63,6 @@ test('local files are bounded UTF-8 data from one server folder, never arbitrary
     '../round.json',
     'C:\\round.json',
     '/round.json',
-    'sub/round.json',
     'round.json:secret',
     'file.txt'
   ])

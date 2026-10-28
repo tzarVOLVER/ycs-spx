@@ -19,7 +19,8 @@ module.exports = function registerYCS(app, config, hooks = {}) {
       localFiles:
         hooks.localFiles ||
         new LocalFiles(
-          settings.localDataRoot || path.resolve(config.general.dataroot, '../data-sources')
+          settings.localDataRoot || path.resolve(config.general.dataroot, '../data-sources'),
+          { locations: settings.localDataLocations || [] }
         )
     }
   );
@@ -114,6 +115,14 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     handlers(async (req, res) =>
       res.json(await sources.updateSource(req.body.id, req.body.value, req.body.revision))
     )
+  );
+  router.get(
+    '/data/local/locations',
+    handlers(async (req, res) => res.json(sources.localFiles.describe()))
+  );
+  router.post(
+    '/data/local/browse',
+    handlers(async (req, res) => res.json(await sources.localFiles.browse(req.body)))
   );
   router.get(
     '/data/local/files',
@@ -273,13 +282,11 @@ module.exports = function registerYCS(app, config, hooks = {}) {
       // and outputs use the /ycs-playback Socket.IO namespace. Keep the stream
       // endpoint for explicit non-browser integrations and existing API tests.
       if (req.get('accept')?.includes('text/event-stream')) return res.sendStatus(204);
-      res
-        .status(200)
-        .set({
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          Connection: 'keep-alive'
-        });
+      res.status(200).set({
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive'
+      });
       res.flushHeaders();
       const send = (value) => res.write(`event: state\ndata: ${JSON.stringify(value)}\n\n`);
       send(state);
@@ -374,12 +381,10 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     )
       return next(error);
     if (res.headersSent) return next(error);
-    res
-      .status(error.status || 500)
-      .json({
-        error: error.status ? error.message : 'Stage operation failed; program state retained',
-        ...(error.fields ? { fields: error.fields } : {})
-      });
+    res.status(error.status || 500).json({
+      error: error.status ? error.message : 'Stage operation failed; program state retained',
+      ...(error.fields ? { fields: error.fields } : {})
+    });
   });
   return playback;
 };

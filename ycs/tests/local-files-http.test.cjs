@@ -19,7 +19,7 @@ async function until(fn) {
   }
   assert.fail('Expected UI state did not arrive');
 }
-async function setup(t) {
+async function setup(t, { apiKey } = {}) {
   const f = await fixture(t),
     localRoot = path.join(f.root, 'local-files');
   await fs.mkdir(localRoot);
@@ -30,6 +30,12 @@ async function setup(t) {
   await fs.writeFile(
     path.join(localRoot, 'stories.csv'),
     'Published;Topic;Subtopic\nTRUE;News;CSV story'
+  );
+  const sharedRoot = path.join(f.root, 'shared');
+  await fs.mkdir(path.join(sharedRoot, 'Orlando'), { recursive: true });
+  await fs.writeFile(
+    path.join(sharedRoot, 'Orlando', 'round.json'),
+    JSON.stringify({ round: 'SHARED ROUND' })
   );
   const app = express();
   app.use(express.json());
@@ -42,6 +48,8 @@ async function setup(t) {
         stages: f.stages,
         dataFile: path.join(f.root, 'sources.json'),
         localDataRoot: localRoot,
+        localDataLocations: [{ id: 'production', label: 'Production data', path: sharedRoot }],
+        ...(apiKey ? { apiKey } : {}),
         slots: { ticker: { order: 10 } }
       }
     },
@@ -171,12 +179,9 @@ test('Data Manager selects server files, tests/saves both formats and exposes ex
     };
   $('add-connection').click();
   change('connection-type', 'local-json');
-  await until(() => $('local-file').options.length === 2);
-  assert.match($('local-file-status').textContent, /SPX server folder/);
-  assert.deepEqual(
-    [...$('local-file').options].map((option) => option.value),
-    ['', 'round.json']
-  );
+  await until(() => $('local-file-status').textContent.startsWith('SPX server location:'));
+  assert.match($('local-file-status').textContent, /SPX server location/);
+  assert.equal($('local-location').value, 'default');
   assert.equal($('sheet-url').disabled, true);
   $('sheet-label').value = 'Local round';
   change('local-file', 'round.json');
@@ -191,11 +196,8 @@ test('Data Manager selects server files, tests/saves both formats and exposes ex
   assert.equal($('connection-dialog').open, false);
   $('add-connection').click();
   change('connection-type', 'local-csv');
-  await until(() => $('local-file').options.length === 2);
-  assert.deepEqual(
-    [...$('local-file').options].map((option) => option.value),
-    ['', 'stories.csv']
-  );
+  await until(() => $('local-file-status').textContent.startsWith('SPX server location:'));
+  assert.equal($('local-file').tagName, 'INPUT');
   assert.equal($('csv-delimiter-field').hidden, false);
   $('sheet-label').value = 'Local stories';
   change('local-file', 'stories.csv');
@@ -222,5 +224,69 @@ test('Data Manager selects server files, tests/saves both formats and exposes ex
   assert.equal(r.playback.snapshot('stage-1', 'program').graphics.length, 0);
   assert.ok(
     requests.every((request) => !request.url.endsWith('/play') && !request.url.endsWith('/update'))
+  );
+});
+
+test('configured server browser routes enforce access and path boundaries without changing connections or program', async (t) => {
+  const r = await setup(t),
+    before = await fs.readFile(path.join(r.root, 'sources.json'), 'utf8');
+  const locations = await fetch(r.base + '/api/ycs/data/local/locations').then((response) =>
+    response.json()
+  );
+  assert.deepEqual(
+    locations.locations.map((location) => location.id),
+    ['default', 'production']
+  );
+  const root = await r.post('/data/local/browse', {
+    location: 'production',
+    directory: '',
+    type: 'local-json'
+  });
+  assert.equal(root.status, 200);
+  assert.equal((await root.json()).entries[0].name, 'Orlando');
+  const folder = await (
+    await r.post('/data/local/browse', {
+      location: 'production',
+      directory: 'Orlando',
+      type: 'local-json'
+    })
+  ).json();
+  assert.equal(folder.entries[0].path, 'Orlando/round.json');
+  for (const body of [
+    { location: 'unknown' },
+    { directory: '../outside' },
+    { directory: 'C:/outside' },
+    { directory: '\\\\OTHER\\share' },
+    { directory: 'Orlando', type: 'text' }
+  ])
+    assert.equal((await r.post('/data/local/browse', body)).status, 400);
+  assert.equal(
+    (
+      await r.post(
+        '/data/local/browse',
+        { location: 'production' },
+        { Origin: 'https://untrusted.example' }
+      )
+    ).status,
+    403
+  );
+  assert.equal(await fs.readFile(path.join(r.root, 'sources.json'), 'utf8'), before);
+  assert.equal(r.playback.snapshot('stage-1', 'program').graphics.length, 0);
+  const tested = await (
+    await r.post('/data/local/test', {
+      type: 'local-json',
+      settings: { location: 'production', file: 'Orlando/round.json', refreshSeconds: 5 }
+    })
+  ).json();
+  assert.equal(tested.data.round, 'SHARED ROUND');
+});
+
+test('server location metadata and browser require the existing API authorization', async (t) => {
+  const r = await setup(t, { apiKey: 'browser-test-key' });
+  assert.equal((await fetch(r.base + '/api/ycs/data/local/locations')).status, 401);
+  assert.equal((await r.post('/data/local/browse', {})).status, 401);
+  assert.equal(
+    (await r.post('/data/local/browse', {}, { Authorization: 'Bearer browser-test-key' })).status,
+    200
   );
 });

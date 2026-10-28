@@ -174,6 +174,9 @@ function settings() {
   if (YCSSourceTypes.isLocal(type))
     return {
       file: $('local-file').value,
+      ...($('local-location').value && $('local-location').value !== 'default'
+        ? { location: $('local-location').value }
+        : {}),
       refreshSeconds,
       ...(type === 'local-csv' ? { delimiter: $('csv-delimiter').value } : {})
     };
@@ -206,6 +209,8 @@ function connectionType() {
   $('csv-delimiter-field').hidden = type !== 'local-csv';
   $('local-file').required = local;
   $('local-file').disabled = !local || Boolean(state.connections[editingId]?.usages.length);
+  $('local-location').disabled = !local || Boolean(state.connections[editingId]?.usages.length);
+  $('refresh-local-files').disabled = Boolean(state.connections[editingId]?.usages.length);
   $('csv-delimiter').disabled =
     type !== 'local-csv' || Boolean(state.connections[editingId]?.usages.length);
   $('sheet-url-label').hidden = local;
@@ -239,7 +244,7 @@ function openConnection(id = null) {
   $('sheet-test-status').textContent = '';
   $('save-sheet').disabled = true;
   $('connection-usage').textContent = connection?.usages.length
-    ? `Used by ${connection.usages.length} field references. You can change its name or refresh interval. Add a new connection to change its file, delimiter, sheet, tab or range.`
+    ? `Used by ${connection.usages.length} field references. You can change its name or refresh interval. Add a new connection to change its location, file, delimiter, sheet, tab or range.`
     : '';
   for (const key of ['sheet-url', 'sheet-range'])
     $(key).readOnly = Boolean(connection?.usages.length);
@@ -252,6 +257,7 @@ function openConnection(id = null) {
   connectionType();
   localPicker.reset({
     file: connection?.settings.file || '',
+    location: connection?.settings.location || 'default',
     locked: Boolean(connection?.usages.length)
   });
   $('sheet-label').focus();

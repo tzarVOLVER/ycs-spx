@@ -43,7 +43,13 @@ function target(settings) {
     url: settings.url,
     worksheet: settings.worksheet,
     range: settings.range,
-    ...(settings.file ? { file: settings.file, delimiter: settings.delimiter } : {})
+    ...(settings.file
+      ? {
+          file: settings.file,
+          delimiter: settings.delimiter,
+          ...(settings.location ? { location: settings.location } : {})
+        }
+      : {})
   };
 }
 function binding(document, input) {
