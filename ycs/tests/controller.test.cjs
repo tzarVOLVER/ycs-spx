@@ -68,6 +68,7 @@ test('field validation errors appear beside their input and clear after a succes
  assert.equal(r.closed(),0);
  r.rejectFields(null);await r.window.previewItem(r.row);
  assert.equal(input.hasAttribute('aria-invalid'),false);assert.equal(r.row.querySelector('.ycs-field-error'),null);
+ assert.equal(r.window.document.querySelector('.ycs-command-status').textContent,'');
 });
 
 test('native Save closes the editor; Stop does not silently refresh a stale editing revision', async t => {

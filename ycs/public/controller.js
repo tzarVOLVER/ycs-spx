@@ -13,6 +13,7 @@ if (stage) {
   document.getElementById('controllerPluginButtons')?.prepend(panel);
   const message = panel.querySelector('.ycs-command-status');
   const models = new Map(), timers = new Map();
+  let validationRow;
   const iconMarkup=name=>`<svg class="ycs-editor-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/ycs/editor-icons.svg#${name}"></use></svg>`;
   let sourceState, active = new Set(), program = new Map(), disposed = false, polling = false, eventsConnected = false;
   async function request(url, body) {
@@ -159,6 +160,7 @@ if (stage) {
       };
       const result = await request(`/api/ycs/stages/${stage}/graphics/${encodeURIComponent(row.dataset.spxEpoch)}/${action}`, body);
       if (!['stop', 'continue'].includes(action)) fieldErrors(row);
+      if (validationRow === row && !['stop', 'continue'].includes(action)) { notify(''); validationRow = null; }
       if (action !== 'preview') {
         if (['play', 'update', 'save'].includes(action)) model.revision = result.editorRevision;
         notify(action === 'save' ? 'Saved. Program unchanged.' : `${row.dataset.spxEpoch}: ${action}`);
@@ -171,7 +173,7 @@ if (stage) {
       }
       return result;
     });
-    model.queue = operation.catch(error => { fieldErrors(row, error.fields); notify(error.message, true); });
+    model.queue = operation.catch(error => { validationRow = error.fields ? row : null; fieldErrors(row, error.fields); notify(error.message, true); });
     return model.queue;
   }
   function schedulePreview(row) { clearTimeout(timers.get(row)); timers.set(row, setTimeout(() => send(row, 'preview'), 300)); }
