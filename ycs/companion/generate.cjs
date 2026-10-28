@@ -5,7 +5,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const value = value => ({ value, isExpression: false });
 const connectionId = 'ycs-spx-http';
-const colors = { play: 0x17693c, update: 0x125a86, stop: 0x922c36, clear: 0x721e2a, label: 0x273944 };
+const colors = { play: 0x17693c, toggle: 0x655097, update: 0x125a86, stop: 0x922c36, clear: 0x721e2a, label: 0x273944 };
 const actions = [
   ['ticker', 'play', 'TICKER\nPLAY'], ['ticker', 'update', 'TICKER\nUPDATE'], ['ticker', 'stop', 'TICKER\nSTOP'],
   ['lower-third', 'play', 'LOWER THIRD\nPLAY'], ['lower-third', 'update', 'LOWER THIRD\nUPDATE'], ['lower-third', 'stop', 'LOWER THIRD\nSTOP'],
@@ -30,12 +30,17 @@ function normalize(baseUrl, stages) {
   if (!Array.isArray(stages) || !stages.length || stages.length > 20 || stages.some(stage => !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$/.test(stage.id)) || new Set(stages.map(stage => stage.id)).size !== stages.length) throw new Error('Choose distinct configured stage IDs');
   return url.origin;
 }
-function build(baseUrl, stages, label = 'ycs_spx') {
+function build(baseUrl, stages, label = 'ycs_spx', { toggles = false } = {}) {
   const prefix = normalize(baseUrl, stages), pages = {};
   const gridSize = { minColumn: 0, maxColumn: 7, minRow: 0, maxRow: 3 };
   function stageRow(stage) {
     const row = { 0: button(stage.id, stage.title || stage.id, colors.label) };
-    actions.forEach(([graphic, action, text], index) => {
+    const controls = toggles ? [
+      ['ticker', 'toggle', 'TICKER\nON / OFF'], ['ticker', 'update', 'TICKER\nUPDATE'],
+      ['lower-third', 'toggle', 'LOWER THIRD\nON / OFF'], ['lower-third', 'update', 'LOWER THIRD\nUPDATE'],
+      [null, 'clear', 'STOP\nSTAGE']
+    ] : actions;
+    controls.forEach(([graphic, action, text], index) => {
       const uri = graphic ? `/api/ycs/stages/${stage.id}/graphics/${graphic}/${action}` : `/api/ycs/stages/${stage.id}/clear`;
       row[index + 1] = button(`${stage.id}-${graphic || 'stage'}-${action}`, text, colors[action], uri);
     }); return row;
@@ -53,11 +58,14 @@ async function generate(root, stages) {
   const folder = path.join(root, 'dist/companion'); await fs.mkdir(folder, { recursive: true });
   const files = [];
   for (const [name, base, label] of [['YCS-Rehearsal', 'http://127.0.0.1:5661', 'ycs_rehearsal'], ['YCS-Orlando', 'http://127.0.0.1:5660', 'ycs_orlando']]) {
-    const full = build(base, stages, label), fullFile = path.join(folder, name + '.companionconfig');
-    await fs.writeFile(fullFile, JSON.stringify(full, null, 2)); files.push(fullFile);
-    for (const [index, stage] of stages.entries()) {
-      const file = path.join(folder, `${name}-${stage.id}.companionconfig`);
-      await fs.writeFile(file, JSON.stringify({ version: full.version, type: 'page', companionBuild: full.companionBuild, page: full.pages[index + 1], oldPageNumber: index + 1, instances: full.instances, connectionCollections: [] }, null, 2)); files.push(file);
+    for (const toggles of [false, true]) {
+      const variant = name + (toggles ? '-Toggle' : '');
+      const full = build(base, stages, label, { toggles }), fullFile = path.join(folder, variant + '.companionconfig');
+      await fs.writeFile(fullFile, JSON.stringify(full, null, 2)); files.push(fullFile);
+      for (const [index, stage] of stages.entries()) {
+        const file = path.join(folder, `${variant}-${stage.id}.companionconfig`);
+        await fs.writeFile(file, JSON.stringify({ version: full.version, type: 'page', companionBuild: full.companionBuild, page: full.pages[index + 1], oldPageNumber: index + 1, instances: full.instances, connectionCollections: [] }, null, 2)); files.push(file);
+      }
     }
   }
   return files;

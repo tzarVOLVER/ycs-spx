@@ -14,6 +14,14 @@ In Companion, open **Import / Export**, choose a file, then use the **Buttons** 
 
 The leftmost button labels the stage and has no action. The seven following buttons are Ticker Play / Update / Stop, Lower Third Play / Update / Stop, and Stop Stage. Every action uses an explicit stage ID and stable graphic item ID with an empty JSON body. There are no toggles or controller-focus dependencies. Update applies the saved draft/current mapped values; it does not take a stopped graphic on air. Pending text that has not been saved in the rundown is not available to Companion. Use the rundown for field changes, manual/linked modes and the rounds-remaining checkbox.
 
+### One-button on/off controls
+
+`POST /api/ycs/stages/stage-1/graphics/ticker/toggle` with body `{}` plays that graphic if it is absent from program, or stops it if active. Substitute the stage or graphic ID for another output/graphic. SPX decides inside the serialized stage command queue using actual program membership, so a change from a rundown or another controller is reflected by the next press. Preview selection and stale saved onair flags do not determine the action. Starting uses saved data/current committed mapping rules just like Play; stopping affects only that graphic.
+
+In Companion use a single Generic HTTP **POST** Press action with that URI, Body `{}` and Content Type `application/json`. Leave Release actions empty. No two-step Companion cycle or local variable is needed. Each request flips state once; duplicate presses/requests flip it twice. Explicit Play/Stop remain useful when a button must always produce one known state.
+
+The generator also writes `YCS-Rehearsal-Toggle.companionconfig`, `YCS-Orlando-Toggle.companionconfig` and matching single-stage page files. These optional variants have one purple ON / OFF button per graphic, separate Update buttons and Stop Stage. Their colors still do not indicate live program state. The original explicit-control profiles remain available.
+
 Green/blue/red identify the command type; they are **not active-state tally**. Companion's connection/button status icons indicate request errors. A successful request means the SPX server accepted it, not that vMix has placed the input on the final broadcast. Continuous program-state feedback is a separate next step; these profiles do not keep a latched success indicator that could be mistaken for live tally.
 
 ## Browser emulator rehearsal
@@ -35,12 +43,13 @@ For the local development server, use base URL `http://127.0.0.1:5660`. Configur
 | Stage 1 ticker: Play | `/api/ycs/stages/stage-1/graphics/ticker/play` |
 | Stage 1 ticker: Update saved values | `/api/ycs/stages/stage-1/graphics/ticker/update` |
 | Stage 1 ticker: Stop | `/api/ycs/stages/stage-1/graphics/ticker/stop` |
+| Stage 1 ticker: Toggle on/off | `/api/ycs/stages/stage-1/graphics/ticker/toggle` |
 | Stage 1 lower third: Play | `/api/ycs/stages/stage-1/graphics/lower-third/play` |
 | Stage 1 lower third: Stop | `/api/ycs/stages/stage-1/graphics/lower-third/stop` |
 | Stage 2 ticker: Play | `/api/ycs/stages/stage-2/graphics/ticker/play` |
 | Stop Stage 1 graphics | `/api/ycs/stages/stage-1/clear` |
 
-Change `stage-1` to `stage-2`/`stage-3` for the other stages. Always use explicit Play and Stop actions. The graphic ID comes from its stable rundown `itemID`, not its position or browser selection. Use the rundown to edit values and visibility controls.
+Change `stage-1` to `stage-2`/`stage-3` for the other stages. Choose explicit Play/Stop or the server-side Toggle action as needed. The graphic ID comes from its stable rundown `itemID`, not its position or browser selection. Use the rundown to edit values and visibility controls.
 
 A successful request returns a JSON program snapshot. Failures return a non-2xx status and `error`; do not display a successful action solely because a request was sent. Snapshot state represents the server's active composition, not proof that vMix has placed the input on the final broadcast. Renderer/vMix confirmation is not implemented yet.
 
