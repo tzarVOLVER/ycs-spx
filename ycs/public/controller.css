@@ -1,22 +1,24 @@
 .ycs-stage-panel{padding:14px;background:#26343f;color:#e2eaf0;font:13px/1.5 system-ui,sans-serif;border:1px solid #4b5d6b;border-radius:6px}
 #controllerPluginButtons>:not(.ycs-stage-panel){display:none!important}.ycs-panel-heading{display:flex;justify-content:space-between;gap:12px;align-items:center}.ycs-heading{font-size:14px;white-space:nowrap}.ycs-stage-links{display:flex;gap:10px}.ycs-stage-panel a{color:#f0cc55}.ycs-stage-links a[aria-current]{font-weight:bold}.ycs-program{margin:10px 0;color:#e5edf3}.ycs-health,.ycs-preview{color:#becbd5;font-size:11px;margin-top:5px}.ycs-error{color:#ffd180!important}.ycs-actions{display:flex;align-items:center;gap:6px;margin:10px 0}.ycs-actions button{background:#192833;border:1px solid #596c7d;border-radius:4px;color:#e2eaf0;padding:6px 10px;cursor:pointer}.ycs-actions button[aria-pressed=true]{border-color:#f0cc55;color:#f0cc55}.ycs-manager-link{margin-left:auto;font-size:12px}.ycs-output-details{font-size:11px;color:#b5c5d0;cursor:pointer}.ycs-clear{margin-top:12px;padding:6px 12px;background:#482d36;color:#ffc2ca;border:1px solid #865360;border-radius:4px;cursor:pointer}.ycs-command-status{margin-top:6px;font-size:12px}.ycs-command-status:empty{display:none}/* Compact inline labels in the native rundown editor. */
-.ycs-editor-content{padding-top:4px;container-type:inline-size}
+.ycs-compact-editor{padding:12px 14px 10px!important;background:#26333c;border:1px solid #43525d;border-radius:4px;box-sizing:border-box}
+.ycs-editor-content{padding-top:0;container-type:inline-size}
 .ycs-editor-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;min-height:24px}
-.ycs-editor-title{display:flex;align-items:center;gap:7px;color:#d8e1e7;font:500 14px/1.4 Arial,sans-serif;text-transform:uppercase}
-.ycs-editor-title .l-icon{font-size:13px;margin:0}
+.ycs-editor-title{display:flex;align-items:center;gap:7px;color:#e1e7eb;font:400 14px/1.4 Arial,sans-serif;text-transform:uppercase}
+.ycs-editor-title .l-icon{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:#a8bbc9;margin:0;font-style:normal}.ycs-editor-title .l-icon:hover{color:#e1e7eb}.ycs-editor-title .ycs-editor-icon{width:14px;height:14px}
 .ycs-editor-toggles{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:6px 12px;margin-left:auto}
 .ycs-editor-field{display:grid;grid-template-columns:112px minmax(0,1fr);align-items:center;gap:0 8px;margin:0 0 7px;font:13px/1.3 Arial,sans-serif}
 .ycs-editor-field>label{display:block;width:auto!important;height:auto!important;min-height:0;color:#c1cfda;font-size:12px;line-height:1.3;margin:0}
-.ycs-editor-field .gcinput{margin:0!important;font:13px/1.3 Arial,sans-serif!important;padding:4px 8px!important;box-sizing:border-box;width:100%;height:29px!important;min-height:0!important;border-radius:2px}
+.ycs-editor-field .gcinput{margin:0!important;font:13px/1.3 Arial,sans-serif!important;padding:4px 8px!important;box-sizing:border-box;width:100%;height:29px!important;min-height:0!important;border:1px solid #aab5bc!important;border-radius:2px;box-shadow:none!important;outline:none!important;background:#fff;color:#172630}
 .ycs-editor-field textarea.gcinput{height:auto!important;min-height:110px!important;resize:vertical}
 .ycs-link-field{display:flex;align-items:center;gap:6px;min-width:0;width:100%}
 .ycs-link-field .gcinput{min-width:0;flex:1;width:auto!important}
-.ycs-link-toggle{flex:0 0 28px;width:28px;height:29px;padding:0!important;border:1px solid #60717d;background:#26343f;color:#b3c0ca;border-radius:3px;cursor:pointer;box-sizing:border-box}
-.ycs-link-toggle.is-unassigned{opacity:.6}
+.ycs-editor-field .gcinput:focus-visible,.ycs-link-toggle:focus-visible,.ycs-template-edit:focus-visible{outline:2px solid #8ebacb!important;outline-offset:2px}
+.ycs-link-toggle{display:inline-flex;align-items:center;justify-content:center;flex:0 0 28px;width:28px;height:29px;padding:0!important;border:1px solid #43525d;background:transparent;color:#a8bbc9;border-radius:3px;cursor:pointer;box-sizing:border-box}
+.ycs-link-toggle.is-unassigned{opacity:.5}
 .ycs-link-toggle.is-linked{color:#66e675;border-color:#66e675}
 .ycs-link-toggle.is-warning{color:#ffd180;border-color:#ffd180}
-.ycs-link-toggle svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;vertical-align:middle}
-.ycs-linked-input{background:#35454f!important;color:#e5edf3!important}
+.ycs-editor-icon{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;vertical-align:middle;pointer-events:none}
+.ycs-editor-field .gcinput.ycs-linked-input{background:#354852!important;color:#eef3f5!important;border-color:#43525d!important}
 /* Keep descriptions available to assistive technology and native tooltips. */
 .ycs-link-detail{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .ycs-link-detail.is-warning{position:static;width:auto;height:auto;overflow:visible;clip-path:none;white-space:normal;grid-column:2;font:11px/1.4 Arial,sans-serif;color:#ffd180;margin:3px 0 0 34px}
@@ -26,10 +28,17 @@
 .ycs-checkbox-field .ycs-link-toggle.is-unassigned{display:none}
 .ycs-editor-field .ycs-check{position:static!important;opacity:1!important;width:14px!important;height:14px!important;display:inline-block!important;appearance:auto!important;margin:0!important;accent-color:#66e675;cursor:pointer}
 .ycs-checkbox-field .ycs-link-detail.is-warning{max-width:200px;margin:0;font-size:11px}
-.ycs-advanced{border-top:1px solid #53616a;margin:8px 0 0;padding-top:6px;font:12px/1.4 Arial,sans-serif;color:#b6c7d3}
+.ycs-advanced{border-top:1px solid #43525d;margin:8px 0 0;padding-top:6px;font:12px/1.4 Arial,sans-serif;color:#b6c7d3}
 .ycs-advanced summary{cursor:pointer;margin:0}.ycs-advanced[open]>summary{margin-bottom:8px}
 .ycs-advanced .ycs-editor-field:has(textarea){align-items:start}
-.ycs-field-mappings{display:inline-block;margin-top:10px;font:12px/1.4 Arial,sans-serif;color:#f0cc55}
+.ycs-field-mappings{display:inline-block;margin-top:10px;font:12px/1.4 Arial,sans-serif;color:#b6c7d3}
+.ycs-editor-footer{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:10px;border-top:1px solid #43525d;padding-top:9px}
+.ycs-editor-footer .ycs-field-mappings{margin:0 auto 0 0}
+.ycs-editor-actions{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.ycs-editor-actions button{width:auto!important;margin:0!important;padding:6px 10px!important;font:12px/1.3 Arial,sans-serif!important;border-radius:3px}
+.ycs-editor-tools{display:flex;align-items:center;gap:9px;margin-left:4px}
+.ycs-editor-tools .l-icon{margin:0;font-size:15px;color:#a8bbc9;cursor:pointer}
+.ycs-editor-tools .l-icon:hover{color:#e1e7eb}
 .ycs-pending{display:block;margin-top:8px;padding:5px 8px;border-radius:3px;background:#51462c;color:#ffe0a2;font:11px/1.4 Arial,sans-serif}
 .ycs-pending[hidden],.ycs-original-fields{display:none!important}
 @container(max-width:420px){.ycs-editor-field{grid-template-columns:92px minmax(0,1fr);gap:0 6px}.ycs-editor-field>label{font-size:11px}.ycs-editor-toggles{margin-left:0}.ycs-checkbox-field{display:flex}}

@@ -72,7 +72,7 @@ test('native Save closes the editor; Stop does not silently refresh a stale edit
 test('compact native editor preserves field nodes and values, keeps checkbox editing and link changes off air, and saves all advanced fields',async t=>{
   const r=await controller(t,true),input=r.row.querySelector('[data-update="f5"]'),checkbox=r.row.querySelector('[data-update="f2"]');
   assert.equal(input,r.originalRound,'moving labels must not replace native inputs or their handlers');assert.equal(r.posts.length,0);
-  assert.ok(r.row.querySelector('.ycs-editor-heading').contains(checkbox));assert.equal(r.row.querySelector('.ycs-editor-title').textContent,'YCS TICKER 1Edit');
+  assert.ok(r.row.querySelector('.ycs-editor-heading').contains(checkbox));assert.equal(r.row.querySelector('.ycs-editor-title').textContent,'YCS TICKER 1');assert.equal(r.row.querySelector('.ycs-editor-title use').getAttribute('href'),'/ycs/editor-icons.svg#square-pen');
   const button=input.previousElementSibling,detail=r.window.document.getElementById(input.getAttribute('aria-describedby'));assert.match(button.title,/Test round/);assert.equal(detail.classList.contains('is-warning'),false);
   checkbox.checked=false;checkbox.dispatchEvent(new r.window.Event('input',{bubbles:true}));button.click();await r.window.previewItem(r.row);
   assert.equal(input.readOnly,true);assert.ok(r.posts.every(post=>post.url.endsWith('/preview')));

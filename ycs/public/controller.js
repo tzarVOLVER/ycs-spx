@@ -13,6 +13,7 @@ if (stage) {
   document.getElementById('controllerPluginButtons')?.prepend(panel);
   const message = panel.querySelector('.ycs-command-status');
   const models = new Map(), timers = new Map();
+  const iconMarkup=name=>`<svg class="ycs-editor-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/ycs/editor-icons.svg#${name}"></use></svg>`;
   let sourceState, active = new Set(), program = new Map(), disposed = false, polling = false, eventsConnected = false;
   async function request(url, body) {
     const response = await fetch(url, body === undefined ? { cache: 'no-store' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -59,6 +60,7 @@ if (stage) {
       input.readOnly = linked; if(input.type==='checkbox'||input.tagName==='SELECT')input.disabled=linked; input.classList.toggle('ycs-linked-input', linked);
       button.setAttribute('aria-pressed', String(linked)); button.setAttribute('aria-label', linked ? 'Use manual ' + title : 'Link ' + title + ' to data source');
       button.classList.toggle('is-linked', linked);button.classList.toggle('is-unassigned',!link.source);
+      button.querySelector('use')?.setAttribute('href','/ycs/editor-icons.svg#'+(linked?'link-2':'unlink-2'));
       const problem = incompatible || !source || sourceState?.health !== 'ok' || (source.health && source.health !== 'ok') || source.warning;
       button.classList.toggle('is-warning', linked && Boolean(problem));
       let description=linked ? `${source?.label || 'Source unavailable'}${problem ? ' · holding last valid value / manual fallback' : ''}` : link.source ? 'Manual override · ' + (source?.label||'unavailable source') : 'Manual · source unassigned';
@@ -81,6 +83,15 @@ if (stage) {
     const heading=document.createElement('div');heading.className='ycs-editor-heading';const headingTitle=document.createElement('div');headingTitle.className='ycs-editor-title';
     const nativeTitle=row.querySelector('#Expanded td[colspan="3"].spxTableHeadsmall');
     if(nativeTitle){while(nativeTitle.firstChild)headingTitle.append(nativeTitle.firstChild);nativeTitle.closest('tr').hidden=true;}else headingTitle.textContent=editor.title||row.dataset.spxEpoch;
+    for(const icon of headingTitle.querySelectorAll('.l-icon')){
+      // Font Awesome observes its generated SVG nodes. A fresh wrapper prevents
+      // it from replacing the local Lucide icon after a class/path change.
+      const replacement=document.createElement('span');replacement.className='l-icon ycs-template-edit';
+      for(const name of ['disabled','HIDE','hide','hidden'])if(icon.classList.contains(name))replacement.classList.add(name);
+      replacement.hidden=icon.hidden;replacement.style.cssText=icon.style.cssText;
+      for(const name of ['onclick','onmouseover','onmouseout'])if(icon.hasAttribute(name))replacement.setAttribute(name,icon.getAttribute(name));
+      replacement.innerHTML=iconMarkup('square-pen');replacement.title=icon.classList.contains('disabled')?'Template folder access is disabled':'Open template folder';icon.replaceWith(replacement);
+    }
     const toggles=document.createElement('div');toggles.className='ycs-editor-toggles';heading.append(headingTitle,toggles);content.append(heading);
     const advanced = document.createElement('details'); advanced.className = 'ycs-advanced'; advanced.innerHTML = '<summary>Appearance & timing</summary>';
     const badge = document.createElement('span'); badge.className = 'ycs-pending'; badge.hidden = true; model.badge = badge;
@@ -98,6 +109,8 @@ if (stage) {
     for (const info of row.querySelectorAll('#Expanded td.aright.spxTableHeadsmall')) info.closest('tr').hidden = true;
     const save = row.querySelector('button[onclick*="saveTemplateItemChangesByElement"]'); if (save) { save.textContent = 'Save draft'; save.title = 'Save without changing program'; }
     const update = row.querySelector('[data-spx-name="updatebutton"]'); if (update) { update.textContent = 'Update on air'; update.title = 'Apply this draft and its field links to program'; }
+    const siblingCells=[...cell.parentElement.children].filter(sibling=>sibling!==cell),nativeActions=siblingCells.flatMap(sibling=>[...sibling.querySelectorAll('button,.l-icon')]);
+    if(nativeActions.length){const footer=document.createElement('div');footer.className='ycs-editor-footer';const actions=document.createElement('div');actions.className='ycs-editor-actions';const tools=document.createElement('div');tools.className='ycs-editor-tools';for(const action of nativeActions)(action.tagName==='BUTTON'?actions:tools).append(action);footer.append(manager,actions,tools);cell.append(footer);for(const sibling of siblingCells)sibling.hidden=true;cell.colSpan=siblingCells.length+1;cell.setAttribute('width','100%');}
   }
   function initialize(row) {
     const id = row.dataset.spxEpoch, model = { links: {}, widgets: {}, revision: 0, queue: Promise.resolve() }; models.set(id, model);
@@ -108,7 +121,7 @@ if (stage) {
         const title = editor.fields?.find(item => item.field === field)?.title || input.placeholder || 'Current round';
         const container = document.createElement('div'); container.className = 'ycs-link-field'; input.before(container);
         const button = document.createElement('button'); button.type = 'button'; button.className = 'ycs-link-toggle';
-        button.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 .1l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7-.1l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>';
+        button.innerHTML = iconMarkup('unlink-2');
         const detail = document.createElement('div'); detail.className = 'ycs-link-detail';detail.id=`ycs-link-${id}-${field}`;input.setAttribute('aria-describedby',[input.getAttribute('aria-describedby'),detail.id].filter(Boolean).join(' '));button.setAttribute('aria-describedby',detail.id);container.append(button, input); container.after(detail);
         model.widgets[field] = { input, button, detail, title };
         button.addEventListener('click', event => {
