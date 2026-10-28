@@ -12,8 +12,7 @@ test('disposable rehearsal uses real template definitions, offline sheet/JSON li
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ycs-rehearsal-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const graphics = path.join(root, 'graphics'); await fs.mkdir(graphics);
-  for (const number of [1, 2, 3]) await fs.writeFile(path.join(graphics, `YCS-Ticker-${number}.html`), `window.SPXGCTemplateDefinition = ${JSON.stringify({ DataFields: [
-    { field: 'f0', ftype: 'hidden', value: `broadcast-${number}` },
+  await fs.writeFile(path.join(graphics, 'ticker.html'), `window.SPXGCTemplateDefinition = ${JSON.stringify({ DataFields: [
     ...['f1', 'f3', 'f4', 'f5', 'f6', 'f7'].map(field => ({ field, ftype: 'textfield', value: '' })),
     { field: 'f14', ftype: 'textarea', value: '[]', ycsCollection: { version: 1, fields: [{ key: 'category' }, { key: 'topic' }, { key: 'subtopic', required: true }] } }
   ] })};`);
@@ -31,7 +30,9 @@ test('disposable rehearsal uses real template definitions, offline sheet/JSON li
     const snapshot = await get(`/api/ycs/stages/stage-${number}/program/state`);
     assert.equal(snapshot.graphics.length, 2);
     const ticker = snapshot.graphics.find(graphic => graphic.id === 'ticker');
-    assert.equal(ticker.data.f0, `broadcast-${number}`);
+    assert.equal(ticker.template, '/templates/ycs/ticker/ticker.html');
+    assert.equal(ticker.data.f0, undefined);
+    assert.equal(ticker.data.f5, `SWISS ROUND ${number} OF 15`);
     const stories = JSON.parse(ticker.data.f14);
     assert.equal(stories.length, 2);
     assert.match(stories[0].topic, new RegExp(`STAGE ${number} UPDATE`));

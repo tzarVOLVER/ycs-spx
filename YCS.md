@@ -6,6 +6,16 @@ The initial implementation keeps SPX's normal rundown editor and HTML template l
 
 ## Development setup
 
+### One shared ticker template
+
+All newly generated stage rundowns use `/ycs/ticker/ticker.html`. Each output still mounts its own iframe and commits its own fields and data bindings. The shared ticker loads neutral defaults only, with no broadcast identity, instance registry or stage-specific JSON fetch. Old saved hidden `f0` values remain compatibility metadata and cannot route or select another instance. Legacy numbered HTML files remain available for existing installations.
+
+For existing imports: stop the runtime, run `node ycs/share-ticker.cjs .local/ycs-dev.json`, then start the runtime again. The migration plans every document first, updates only matching numbered ticker paths in configured project profiles/rundowns, increments edited item revisions and moves affected template-default keys to the shared path. Field values, story JSON, links, item IDs and explicit mappings are retained. Exact `.before-shared-ticker.json` backups are created; repeated runs make no changes. Conflicting defaults are rejected before writes. The command refuses to run while the configured loopback server is listening. Program restarts stopped; reload open rundown/mapping editors after migration.
+
+### Companion controls
+
+Run `npm run ycs:companion` to generate Companion **5.1** JSON imports under ignored `dist/companion/`. The format was checked against Companion 5.1.1 and Generic HTTP 3.2.0. Each configured stage gets its own page; a combined overview provides the same commands. Controls use explicit Play/Update/Stop for ticker and lower third and stage-only Stop. The rehearsal import targets port 5661; the normal import targets port 5660. Generated files contain no saved show data, sources, credentials, triggers or surface settings. See [COMPANION.md](ycs/COMPANION.md) for import, emulator testing and LAN setup. These are control buttons with action colors and connection error indicators, not continuously polled program/vMix tally.
+
 ### Single-computer Orlando rehearsal
 
 From this checkout, run `node ycs/rehearsal.cjs` (or `npm run ycs:rehearsal`) and open **http://127.0.0.1:5661/rehearsal**. No Stream Deck or vMix installation is required. The separate loopback-only process uses the actual ticker templates from the sibling graphics checkout and the existing test lower third. It creates a fresh disposable show under `.local/rehearsals/run-*`; it never reads the development/production configuration, rundowns, real sheet URLs or saved mappings. It adds no routes to the normal SPX server. Port 5660 is explicitly rejected, and occupied ports are not taken over. Optional arguments are `--port 5662` and `--graphics ABSOLUTE_TICKER_FOLDER`.

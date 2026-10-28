@@ -27,11 +27,11 @@ async function prepare(root, graphicsRoot) {
   for (const number of numbers) {
     const stage = stages[number - 1], stageRoot = path.join(root, 'rundowns', stage.project, 'data');
     await fs.mkdir(stageRoot, { recursive: true });
-    const html = await fs.readFile(path.join(graphicsRoot, `YCS-Ticker-${number}.html`), 'utf8');
+    const html = await fs.readFile(path.join(graphicsRoot, 'ticker.html'), 'utf8');
     const match = html.match(/window\.SPXGCTemplateDefinition = (\{[\s\S]*?\});/);
     if (!match) throw new Error('Ticker definition not found');
     const ticker = JSON.parse(match[1]);
-    Object.assign(ticker, { itemID: 'ticker', relpath: `/ycs/ticker/YCS-Ticker-${number}.html`, ycsSlot: 'ticker', onair: 'false' });
+    Object.assign(ticker, { itemID: 'ticker', relpath: '/ycs/ticker/ticker.html', ycsSlot: 'ticker', onair: 'false' });
     const values = { f1: '{}', f3: 'TEST DATA · NOT FOR AIR', f4: 'LOCAL REHEARSAL', f5: `SWISS ROUND ${number} OF 15`, f6: 'YCS ORLANDO · REHEARSAL', f7: 'YCS ORLANDO, FL', f14: JSON.stringify([{ subtopic: `STAGE ${number} MANUAL FALLBACK` }]) };
     for (const field of ticker.DataFields) if (Object.hasOwn(values, field.field)) field.value = values[field.field];
     if (!ticker.DataFields.find(field => field.field === 'f14')?.ycsCollection) throw new Error('Use the ticker version that declares Stories (f14)');

@@ -96,6 +96,7 @@ ASSETS/**
 
 # Local YCS runtime/configuration and generated demo rundowns.
 .local/
+dist/companion/
 !ycs/**/*.md
 !YCS.md
 
