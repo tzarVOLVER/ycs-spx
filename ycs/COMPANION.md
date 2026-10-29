@@ -20,11 +20,11 @@ Use GET, or POST with an empty JSON object, at the same address:
     http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/stop
     http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/toggle
     http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/update
-    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/select
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/focus
     http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/preview
     http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/continue
 
-- **Focus** uses `/select`; `/focus` is an alias. It focuses the matching row in currently open controllers for that configured rundown. It does not open a browser, navigate another rundown, play a graphic, change preview, save fields or overwrite unsaved edits. Reconnecting does not replay old focus commands.
+- **Focus** uses `/focus`; `/select` remains an alias for older buttons. It prepares the item in that output's Preview using saved fields and current mappings, then highlights the matching row in open controllers and selects their Preview monitor. It works even if no controller is open. Program and saved rundown bytes are unchanged. Local unsaved editor values remain intact; a brief message reminds you to save them before Companion Play. A failed preview does not move focus. Reconnecting does not replay old focus commands.
 - **Play** uses saved fields and current mappings. Repeated Play updates the active item without replaying its entrance.
 - **Stop** removes that item from program.
 - **Toggle** checks actual program inside the output queue and chooses Play or Stop. Use one Press action, with no Release action: duplicate requests toggle twice. Opening or refreshing a Toggle URL in the browser executes it again.
@@ -34,6 +34,6 @@ Use GET, or POST with an empty JSON object, at the same address:
 
 Project and rundown must match exactly one configured output in `ycs.stages`. Unknown/unconfigured pairs return 404; ambiguous pairs return 409. This address format does not automatically provision outputs for new projects. Native editor, data and renderer internals retain existing stage routes for compatibility. The public item API does not accept field edits. GET and POST share the same authorization and playback queue. Responses are marked no-store; HEAD and other methods return 405 without executing commands.
 
-Nickname changes and reordering do not change the item ID. Deleting and re-adding an item creates a different ID, so copy its new URL. The compact copy control never executes an action. Hover the icon to inspect its target; selectable text appears if clipboard access is blocked. An item without an output slot permits Focus copying but disables playback-action copying.
+Nickname changes and reordering do not change the item ID. Deleting and re-adding an item creates a different ID, so copy its new URL. The compact copy control never executes an action. Hover the icon to inspect its target; selectable text appears if clipboard access is blocked. An item without an output slot disables action copying until a slot is assigned.
 
 Successful HTTP responses describe server state, not vMix broadcast tally. Check failed/non-2xx commands in Companion's connection status/log. Test on the separate rehearsal first. Venue LAN/vMix and physical surfaces still need validation.

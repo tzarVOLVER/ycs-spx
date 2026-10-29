@@ -16,7 +16,7 @@ window.YCSCompanionTools = function ({ row, project, rundown, editor, copyIcon, 
   for (const action of window.YCSCompanion.actions) {
     const option = document.createElement('option');
     option.value = action;
-    option.textContent = action === 'select' ? 'Focus' : action[0].toUpperCase() + action.slice(1);
+    option.textContent = action[0].toUpperCase() + action.slice(1);
     select.append(option);
   }
   select.value = 'play';
@@ -40,7 +40,7 @@ window.YCSCompanionTools = function ({ row, project, rundown, editor, copyIcon, 
         window.YCSCompanion.command(project, rundown, item, select.value).path,
         location.href
       ).href;
-      button.disabled = editor.slotConfigured === false && select.value !== 'select';
+      button.disabled = editor.slotConfigured === false;
       button.title = button.disabled
         ? 'Assign an output slot to this item first'
         : 'Copy GET ' + url;

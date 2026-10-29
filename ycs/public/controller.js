@@ -7,7 +7,7 @@ if (stage) {
   const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '/ycs/controller.css'; document.head.append(css);
   const stagePanel = new window.YCSStagePanel({ stage, onStop: clearStage });
   const models = new Map(), timers = new Map();
-  let validationRow;
+  let validationRow, previewGeneration = 0;
   const iconMarkup=name=>`<svg class="ycs-editor-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="/ycs/editor-icons.svg#${name}"></use></svg>`;
   let sourceState, active = new Set(), program = new Map(), disposed = false, polling = false;
   async function request(url, body) {
@@ -177,8 +177,10 @@ if (stage) {
     if (!row) return Promise.resolve();
     const model = models.get(row.dataset.spxEpoch); if (!model) return Promise.resolve();
     clearTimeout(timers.get(row));
+    const generation = previewGeneration;
     const operation = model.queue.then(async () => {
       await model.ready;
+      if (action === 'preview' && generation !== previewGeneration) return;
       const body = ['stop', 'continue'].includes(action) ? {} : {
         fields: fields(row), links: Object.fromEntries(Object.entries(model.links).map(([field, link]) => [field, { mode: link.mode, manual: link.manual }])), revision: model.revision
       };
@@ -296,11 +298,16 @@ if (stage) {
   stageEvents.on('connect', () => stageEvents.emit('subscribe', { stage, modes: ['program', 'preview'], controller: true }));
   stageEvents.on('focus', selection => {
     if (disposed || selection.stage !== stage) return;
+    previewGeneration++;
+    for (const timer of timers.values()) clearTimeout(timer);
+    timers.clear();
     const row = [...document.querySelectorAll('.itemrow')].find(row => row.dataset.spxEpoch === selection.selected);
     if (!row) { notify('Selected item is missing. Reload the rundown.', true); return; }
     for (const item of document.querySelectorAll('.itemrow')) item.classList.toggle('inFocus', item === row);
     row.scrollIntoView?.({ block: 'nearest' });
     window.setMasterButtonStates?.(row);
+    stagePanel.selectMonitor('preview');
+    if (row.dataset.spxChanged === 'true') notify('Previewing saved values. Save edits before using Companion Play.');
   });
   stageEvents.on('state', snapshot => {
     if (snapshot.stage !== stage) return;

@@ -354,7 +354,7 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     handlers(async (req, res) => {
       const { project, rundown, graphic, action } = req.params;
       const allowed = require('./public/companion-contract.js').actions;
-      if (!allowed.includes(action) && action !== 'focus')
+      if (!allowed.includes(action) && action !== 'select')
         return res.status(400).json({ error: 'Unknown item action' });
       const matches = [...repository.stages.values()].filter(
         (stage) => stage.project === project && stage.rundown === rundown
@@ -373,7 +373,7 @@ module.exports = function registerYCS(app, config, hooks = {}) {
       const stage = matches[0].id;
       res.json(
         action === 'select' || action === 'focus'
-          ? await playback.select(stage, graphic)
+          ? await playback.focus(stage, graphic)
           : await playback.command(stage, graphic, action)
       );
     })

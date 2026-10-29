@@ -91,12 +91,12 @@ test('item commands enforce auth, origin, exact configured scope and saved-data-
   assert.equal((await ambiguous.post(url)).status, 409);
   assert.equal(
     contract.command('Stage1', 'Show', 'ticker', 'focus').path,
-    '/api/Stage1/Show/ticker/select'
+    '/api/Stage1/Show/ticker/focus'
   );
   for (const id of ['../bad', 'bad/name', '', null])
     assert.throws(() => contract.command(id, 'Show', 'ticker', 'play'));
 });
-test('select/focus deliver only to matching open controllers, without writes or output changes', async (t) => {
+test('focus/select preview saved data and notify only matching controllers, without writes or Program changes', async (t) => {
   const r = await setup(t),
     sockets = [];
   t.after(() => sockets.forEach((s) => s.disconnect()));
@@ -140,19 +140,26 @@ test('select/focus deliver only to matching open controllers, without writes or 
         resolve(value);
       });
     });
-    assert.equal((await r.post('/api/Stage1/Show/lower-third/' + action)).status, 200);
+    const response = await r.post('/api/Stage1/Show/lower-third/' + action);
+    assert.equal(response.status, 200);
+    const snapshot = await response.json();
+    assert.equal(snapshot.mode, 'preview');
+    assert.equal(snapshot.selected, 'lower-third');
     assert.deepEqual(await event, { stage: 'stage-1', selected: 'lower-third' });
   }
   assert.equal(await fs.readFile(r.repository.stage('stage-1').file, 'utf8'), before);
-  assert.deepEqual(r.playback.snapshot('stage-1', 'program'), program);
-  assert.deepEqual(r.playback.snapshot('stage-1', 'preview'), preview);
+  assert.deepEqual(r.playback.snapshot('stage-1', 'program').graphics, program.graphics);
+  assert.equal(r.playback.snapshot('stage-1', 'preview').selected, 'lower-third');
+  assert.equal(r.playback.snapshot('stage-1', 'preview').graphics[0].data.f5, 'STAGE 1 ROUND');
   assert.equal(foreign, 0);
   assert.equal(renderer, 0);
   assert.equal((await r.post('/api/Stage1/Show/missing/select')).status, 404);
   const unslotted = await r.repository.read('stage-1');
   delete unslotted.templates[1].ycsSlot;
   await r.repository.write('stage-1', unslotted);
-  assert.equal((await r.post('/api/Stage1/Show/lower-third/select')).status, 200);
+  const previous = r.playback.snapshot('stage-1', 'preview');
+  assert.equal((await r.post('/api/Stage1/Show/lower-third/select')).status, 422);
+  assert.deepEqual(r.playback.snapshot('stage-1', 'preview'), previous);
   assert.equal((await r.post('/api/Stage1/Show/lower-third/play')).status, 422);
 });
 
@@ -206,4 +213,57 @@ test('GET retains auth and origin checks; HEAD and unsupported methods never exe
   assert.equal(await fs.readFile(r.repository.stage('stage-1').file, 'utf8'), before);
   assert.deepEqual(r.playback.snapshot('stage-1', 'program'), program);
   assert.deepEqual(r.playback.snapshot('stage-1', 'preview'), preview);
+});
+
+test('headless Focus uses current saved mappings, preserves on-air content and matches subsequent saved-data Play', async (t) => {
+  const r = await setup(t),
+    sources = r.playback.sources;
+  await r.playback.command('stage-1', 'ticker', 'play');
+  const onair = r.playback.snapshot('stage-1', 'program').graphics;
+  await r.playback.command('stage-1', 'ticker', 'save', undefined, {
+    links: { f5: { mode: 'linked', manual: 'SAVED FALLBACK' } }
+  });
+  await sources.updateSource(
+    'test.stage-1.currentRound',
+    'LIVE ROUND 12',
+    sources.snapshot().revision
+  );
+  const file = r.repository.stage('stage-1').file,
+    before = await fs.readFile(file, 'utf8');
+  const sourceBefore = await fs.readFile(path.join(r.root, 'sources.json'), 'utf8');
+  const response = await fetch(r.base + '/api/Stage1/Show/ticker/focus');
+  assert.equal(response.status, 200);
+  const preview = await response.json();
+  assert.equal(preview.mode, 'preview');
+  assert.equal(preview.selected, 'ticker');
+  assert.equal(preview.graphics[0].data.f5, 'LIVE ROUND 12');
+  assert.deepEqual(r.playback.snapshot('stage-1', 'program').graphics, onair);
+  assert.equal(r.playback.snapshot('stage-2', 'preview').selected, null);
+  assert.equal(await fs.readFile(file, 'utf8'), before);
+  assert.equal(await fs.readFile(path.join(r.root, 'sources.json'), 'utf8'), sourceBefore);
+  assert.equal(
+    contract.command('Stage1', 'Show', 'ticker', 'select').path,
+    '/api/Stage1/Show/ticker/focus'
+  );
+  assert.throws(
+    () => r.playback.command('stage-1', 'ticker', 'focus', [{ field: 'f5', value: 'UNSAVED' }]),
+    { status: 400 }
+  );
+  assert.equal((await r.post('/api/Stage1/Show/ticker/play')).status, 200);
+  assert.deepEqual(r.playback.snapshot('stage-1', 'program').graphics, preview.graphics);
+});
+test('failed Focus leaves preview and Program intact and never emits a controller focus event', async (t) => {
+  const r = await setup(t);
+  await r.playback.focus('stage-1', 'lower-third');
+  const before = r.playback.snapshot('stage-1', 'preview'),
+    program = r.playback.snapshot('stage-1', 'program');
+  let focused = 0;
+  r.playback.on('stage-1:focus', () => focused++);
+  const show = await r.repository.read('stage-1');
+  delete show.templates[0].ycsSlot;
+  await r.repository.write('stage-1', show);
+  assert.equal((await fetch(r.base + '/api/Stage1/Show/ticker/focus')).status, 422);
+  assert.deepEqual(r.playback.snapshot('stage-1', 'preview'), before);
+  assert.deepEqual(r.playback.snapshot('stage-1', 'program'), program);
+  assert.equal(focused, 0);
 });

@@ -205,7 +205,7 @@ test('compact action picker copies exact project/rundown/item URLs without reque
   );
   const input = r.row.querySelector('[data-update="f5"]');
   input.value = 'UNSAVED DRAFT';
-  for (const action of ['select', 'play', 'stop', 'toggle', 'update', 'preview', 'continue']) {
+  for (const action of ['focus', 'play', 'stop', 'toggle', 'update', 'preview', 'continue']) {
     select.value = action;
     select.dispatchEvent(new r.window.Event('change', { bubbles: true }));
     button.click();
@@ -219,15 +219,28 @@ test('compact action picker copies exact project/rundown/item URLs without reque
   assert.equal(copied.at(-1), 'http://localhost/api/Stage1/Show/ticker/play');
 });
 
-test('remote focus selects only a matching row and preserves open drafts without preview or playout', async (t) => {
+test('remote focus selects Preview monitor and preserves drafts without sending another preview or playout', async (t) => {
   const r = await controller(t, true),
     input = r.row.querySelector('[data-update="f5"]');
   input.value = 'UNSAVED';
+  input.dispatchEvent(new r.window.Event('input', { bubbles: true }));
+  const queuedPreview = r.window.previewItem(r.row);
+  r.window.document.querySelector('[data-monitor="program"]').click();
   r.row.classList.remove('inFocus');
   r.focus({ stage: 'stage-2', selected: 'ticker' });
   assert.equal(r.row.classList.contains('inFocus'), false);
   r.focus({ stage: 'stage-1', selected: 'ticker' });
   assert.equal(r.row.classList.contains('inFocus'), true);
+  await queuedPreview;
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.equal(
+    r.window.document.getElementById('previewIF').getAttribute('src'),
+    '/output/stage-1/preview'
+  );
+  assert.match(
+    r.window.document.querySelector('.ycs-command-status').textContent,
+    /Previewing saved values/
+  );
   assert.equal(input.value, 'UNSAVED');
   assert.equal(r.posts.length, 0);
   assert.equal(r.closed(), 0);

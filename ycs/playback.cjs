@@ -187,16 +187,11 @@ class Playback extends EventEmitter {
       return { nickname: name, editorRevision: item.ycsEditRevision || 0 };
     });
   }
-  select(stageId, graphicId) {
-    return this.queue(stageId, async () => {
-      this.repository.item(await this.repository.read(stageId), graphicId);
-      const selection = { stage: stageId, selected: graphicId };
-      this.emit(stageId + ':focus', selection);
-      return selection;
-    });
-  }
+  focus(stageId, graphicId) { return this.command(stageId, graphicId, 'focus'); }
+  select(stageId, graphicId) { return this.focus(stageId, graphicId); }
   command(stageId, graphicId, action, fields, options = {}) {
-    if (!['play', 'stop', 'toggle', 'update', 'preview', 'save', 'continue'].includes(action)) fail('Unknown command');
+    if (!['play', 'stop', 'toggle', 'update', 'preview', 'save', 'continue', 'focus'].includes(action)) fail('Unknown command');
+    if (action === 'focus' && (fields !== undefined || options.links !== undefined)) fail('Focus uses saved data', 400);
     return this.queue(stageId, async () => {
       const rundown = await this.repository.read(stageId);
       const item = this.repository.item(rundown, graphicId);
@@ -206,7 +201,7 @@ class Playback extends EventEmitter {
       // Resolve inside the stage queue, using actual program membership rather
       // than saved onair flags, preview selection or a Companion-local toggle.
       if (action === 'toggle') action = active ? 'stop' : 'play';
-      const changesData = ['play', 'update', 'save', 'preview'].includes(action);
+      const changesData = ['play', 'update', 'save', 'preview', 'focus'].includes(action);
       const originalContent = JSON.stringify([item.DataFields, item.ycsLinks || {}]);
       if (changesData && options.revision !== undefined && options.revision !== (item.ycsEditRevision || 0)) fail('This graphic was saved in another controller. Reload before continuing.', 409);
       if (changesData && options.links !== undefined && (!options.links || typeof options.links !== 'object' || Array.isArray(options.links))) fail('Invalid field links');
@@ -243,7 +238,7 @@ class Playback extends EventEmitter {
       // until its links have been installed in program/preview, or the write fails.
       const release = this.sources?.holdReferences?.(Object.values(graphic.links || {}).filter(link => link.mode === 'linked').map(link => link.source));
       try {
-        if (action === 'preview') {
+        if (action === 'preview' || action === 'focus') {
           state.draft = graphic;
         } else if (action === 'save') {
           if (contentChanged) item.ycsEditRevision = (item.ycsEditRevision || 0) + 1;
@@ -274,7 +269,8 @@ class Playback extends EventEmitter {
           if (state.draft?.id === graphicId && action !== 'stop') state.draft = graphic;
         }
         this.publish(stageId);
-        return { ...this.snapshot(stageId, action === 'preview' || action === 'save' ? 'preview' : 'program'), editorRevision: item.ycsEditRevision || 0 };
+        if (action === 'focus') this.emit(stageId + ':focus', { stage: stageId, selected: graphicId });
+        return { ...this.snapshot(stageId, action === 'preview' || action === 'focus' || action === 'save' ? 'preview' : 'program'), editorRevision: item.ycsEditRevision || 0 };
       } finally { release?.(); }
     });
   }
