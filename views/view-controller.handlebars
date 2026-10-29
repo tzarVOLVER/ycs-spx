@@ -543,7 +543,7 @@
                     data-spx-timerid   = ""
                     data-spx-stepsleft = "{{steps}}"
                     onClick            = "focusRow(this);"
-                    ondblclick         = "ToggleExpand(this);"
+                    ondblclick         = "if (this.querySelector('#Collapsed').style.display !== 'none') ToggleExpand(this);"
                     old-ondblclick     = "ToggleExpand({{@index}});"
                     onmouseover        = "tip('{{lang 'hover.item'}}');">
 
