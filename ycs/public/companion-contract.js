@@ -14,10 +14,8 @@
     if (action === 'focus') action = 'select';
     if (!actions.includes(action)) throw new Error('Unknown item action');
     return {
-      method: 'POST',
-      path: '/api/' + [project, rundown, item, action].map(encodeURIComponent).join('/'),
-      body: '{}',
-      contentType: 'application/json'
+      method: 'GET',
+      path: '/api/' + [project, rundown, item, action].map(encodeURIComponent).join('/')
     };
   }
   return { command, actions };

@@ -43,7 +43,7 @@ window.YCSCompanionTools = function ({ row, project, rundown, editor, copyIcon, 
       button.disabled = editor.slotConfigured === false && select.value !== 'select';
       button.title = button.disabled
         ? 'Assign an output slot to this item first'
-        : 'Copy POST ' + url;
+        : 'Copy GET ' + url;
     } catch (error) {
       button.disabled = true;
       button.title = error.message;

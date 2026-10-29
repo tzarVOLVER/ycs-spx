@@ -329,11 +329,19 @@ module.exports = function registerYCS(app, config, hooks = {}) {
 
   // Public control addresses identify the saved project/rundown/item. The
   // configured output is resolved exactly; there is no global focused rundown.
-  app.post(
+  app.all(
     '/api/:project/:rundown/:graphic/:action',
     // Leave existing API namespaces to their own routers, including removed
     // endpoints that must remain 404 rather than becoming item commands.
     (req, res, next) => ['ycs', 'v1'].includes(req.params.project) ? next('route') : next(),
+    (req, res, next) => {
+      res.set('Cache-Control', 'no-store');
+      // Express normally runs GET handlers for HEAD too. Control URLs must
+      // execute only explicit GET/POST requests, never probes or preflights.
+      if (!['GET', 'POST'].includes(req.method))
+        return res.set('Allow', 'GET, POST').status(405).end();
+      next();
+    },
     sameOrigin,
     apiAccess,
     handlers(async (req, res) => {

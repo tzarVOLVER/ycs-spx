@@ -155,3 +155,55 @@ test('select/focus deliver only to matching open controllers, without writes or 
   assert.equal((await r.post('/api/Stage1/Show/lower-third/select')).status, 200);
   assert.equal((await r.post('/api/Stage1/Show/lower-third/play')).status, 422);
 });
+
+test('GET supports the same saved-data item actions as POST, including repeat toggles and stage isolation', async (t) => {
+  const r = await setup(t),
+    show = await r.repository.read('stage-1');
+  show.templates[0].steps = 2;
+  await r.repository.write('stage-1', show);
+  const get = (action) => fetch(r.base + '/api/Stage1/Show/ticker/' + action);
+  for (const action of ['play', 'update', 'continue', 'preview', 'select', 'focus', 'stop']) {
+    const response = await get(action);
+    assert.equal(response.status, 200, action);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+  }
+  assert.equal(r.playback.snapshot('stage-1', 'program').graphics.length, 0);
+  for (const count of [1, 0, 1, 0]) {
+    assert.equal((await get('toggle')).status, 200);
+    assert.equal(r.playback.snapshot('stage-1', 'program').graphics.length, count);
+  }
+  assert.equal(r.playback.snapshot('stage-2', 'program').graphics.length, 0);
+  assert.equal(contract.command('Stage1', 'Show', 'ticker', 'play').method, 'GET');
+  assert.equal((await r.post('/api/Stage1/Show/ticker/play')).status, 200);
+});
+
+test('GET retains auth and origin checks; HEAD and unsupported methods never execute controls', async (t) => {
+  const r = await setup(t, { apiKey: 'get-test-key' }),
+    url = r.base + '/api/Stage1/Show/ticker/play';
+  const headers = { Authorization: 'Bearer get-test-key' };
+  assert.equal((await fetch(url)).status, 401);
+  assert.equal(
+    (await fetch(url, { headers: { ...headers, Origin: 'https://foreign.invalid' } })).status,
+    403
+  );
+  assert.equal((await fetch(r.base + '/api/Stage1/Wrong/ticker/play', { headers })).status, 404);
+  assert.equal((await fetch(r.base + '/api/Stage1/Show/missing/play', { headers })).status, 404);
+  assert.equal((await fetch(r.base + '/api/Stage1/Show/ticker/unknown', { headers })).status, 400);
+  assert.equal((await fetch(url, { headers })).status, 200);
+  const before = await fs.readFile(r.repository.stage('stage-1').file, 'utf8');
+  const program = r.playback.snapshot('stage-1', 'program'),
+    preview = r.playback.snapshot('stage-1', 'preview');
+  for (const method of ['HEAD', 'OPTIONS', 'PUT', 'DELETE'])
+    for (const action of [...contract.actions, 'focus']) {
+      const response = await fetch(r.base + '/api/Stage1/Show/ticker/' + action, {
+        method,
+        headers
+      });
+      assert.equal(response.status, 405, method + ' ' + action);
+      assert.equal(response.headers.get('allow'), 'GET, POST');
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+    }
+  assert.equal(await fs.readFile(r.repository.stage('stage-1').file, 'utf8'), before);
+  assert.deepEqual(r.playback.snapshot('stage-1', 'program'), program);
+  assert.deepEqual(r.playback.snapshot('stage-1', 'preview'), preview);
+});
