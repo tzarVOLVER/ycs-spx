@@ -278,3 +278,9 @@ Saving a connection or mapping stays off air. Enable the field's link and explic
 Existing connections stored with relative filenames and optional named server locations remain compatible. The editor displays their full resolved path while retaining the original saved target identity until the path is changed. `ycs.localDataRoot` and `ycs.localDataLocations` remain supported for those saved connections, without a location dropdown or folder browser. New full-path connections need no server folder configuration or restart.
 
 API: `POST /api/ycs/data/local/test` accepts `{type:'local-json'|'local-csv',settings:{file,refreshSeconds,delimiter?}}` and previews without saving. `file` is the full server path. Existing connection/mapping APIs save it. Operator/API authorization and same-origin checks remain in place; authorized operators can read any matching JSON/CSV file accessible to the SPX process. Files are not served as static downloads. Legacy `{location?,file}` references still resolve relative to their configured root; `GET /api/ycs/data/local/locations` supplies metadata only for editing those saved references. Folder listing endpoints have been removed.
+
+## Lower-third draft controls
+
+Templates may set `ycsPreviewOnEdit: false` to keep checkbox, text, layout and link edits in the editor until explicit Preview, Play or Update. Other templates retain automatic edit previews. Save keeps Program unchanged; Companion Focus/Play reads saved values. This optional metadata is specific to the YCS fork.
+
+The graphics repository now includes `graphics/lower-third/lower-third.html`: one reusable template with 1–4 fixed nameplate layouts, per-plate Show checkboxes and fitting name/title text. It uses the `lower-third` slot and has no appearance/timing fields. Install its package with shared helpers/fonts intact. The existing `graphicsRoot` ticker development mount also serves sibling `shared` and `lower-third` directories.

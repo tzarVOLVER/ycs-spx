@@ -88,6 +88,14 @@ if (stage) {
     while (cell.firstChild) original.append(cell.firstChild); cell.append(original);
     cell.classList.add('ycs-compact-editor');
     const content = document.createElement('div'); content.className = 'ycs-editor-content';
+    content.addEventListener('click', event => {
+      if (model.previewOnEdit !== false) return;
+      // Native row clicks normally preview on focus. Editing a deferred template
+      // should select it for the master controls without taking it to Preview.
+      event.stopPropagation();
+      for (const item of document.querySelectorAll('.itemrow')) item.classList.toggle('inFocus', item === row);
+      window.setMasterButtonStates?.(row);
+    });
     const heading=document.createElement('div');heading.className='ycs-editor-heading';const headingTitle=document.createElement('div');headingTitle.className='ycs-editor-title';
     const nativeTitle=row.querySelector('#Expanded td[colspan="3"].spxTableHeadsmall');
     if(nativeTitle){while(nativeTitle.firstChild)headingTitle.append(nativeTitle.firstChild);nativeTitle.closest('tr').hidden=true;}else headingTitle.textContent=editor.title||row.dataset.spxEpoch;
@@ -141,7 +149,7 @@ if (stage) {
   function initialize(row) {
     const id = row.dataset.spxEpoch, model = { links: {}, widgets: {}, revision: 0, queue: Promise.resolve() }; models.set(id, model);
     model.ready = request(`/api/ycs/stages/${stage}/graphics/${encodeURIComponent(id)}/editor`).then(editor => {
-      model.links = editor.links; model.revision = editor.revision; model.template = editor.template; model.nickname=editor.nickname || ''; organize(row, editor, model);
+      model.previewOnEdit = editor.previewOnEdit !== false; model.links = editor.links; model.revision = editor.revision; model.template = editor.template; model.nickname=editor.nickname || ''; organize(row, editor, model);
       window.YCSCompanionTools({ row, project, rundown, editor, copyIcon: stagePanel.icon('copy'), copyText: (...args) => stagePanel.copyText(...args) });
       for (const [field, link] of Object.entries(model.links)) {
         const input = row.querySelector(`[data-update="${field}"]`); if (!input) continue;
@@ -155,7 +163,7 @@ if (stage) {
           event.stopPropagation();
           if (link.mode === 'manual') { if (!link.source) { notify('Assign a source using Manage field mappings first.', true); return; } link.manual = manualValue(input); link.mode = 'linked'; }
           else { link.mode = 'manual'; showValue(input,link.manual); }
-          row.dataset.spxChanged = 'true'; paintLink(row, model); send(row, 'preview');
+          row.dataset.spxChanged = 'true'; paintLink(row, model); send(row, 'preview', true);
         }); showValue(input,link.manual);
       }
       paintLink(row, model);
@@ -173,13 +181,14 @@ if (stage) {
     model.queue=operation.catch(error=>notify(error.message,true));
     return operation;
   }
-  function send(row, action) {
+  function send(row, action, automatic = false) {
     if (!row) return Promise.resolve();
     const model = models.get(row.dataset.spxEpoch); if (!model) return Promise.resolve();
     clearTimeout(timers.get(row));
     const generation = previewGeneration;
     const operation = model.queue.then(async () => {
       await model.ready;
+      if (automatic && model.previewOnEdit === false) return;
       if (action === 'preview' && generation !== previewGeneration) return;
       const body = ['stop', 'continue'].includes(action) ? {} : {
         fields: fields(row), links: Object.fromEntries(Object.entries(model.links).map(([field, link]) => [field, { mode: link.mode, manual: link.manual }])), revision: model.revision
@@ -202,7 +211,7 @@ if (stage) {
     model.queue = operation.catch(error => { if (action === 'preview') row.dataset.spxPreviewing = 'false'; validationRow = error.fields ? row : null; fieldErrors(row, error.fields); notify(error.message, true); });
     return model.queue;
   }
-  function schedulePreview(row) { clearTimeout(timers.get(row)); timers.set(row, setTimeout(() => send(row, 'preview'), 300)); }
+  function schedulePreview(row) { clearTimeout(timers.get(row)); if (models.get(row.dataset.spxEpoch)?.previewOnEdit === false) return; timers.set(row, setTimeout(() => send(row, 'preview', true), 300)); }
   for (const row of document.querySelectorAll('.itemrow')) initialize(row);
   document.addEventListener('input', event => {
     const row = event.target.closest('.itemrow'); if (!row || !event.target.matches('[data-update]')) return;

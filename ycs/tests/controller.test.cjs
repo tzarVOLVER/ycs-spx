@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
-async function controller(t, compact = false) {
+async function controller(t, compact = false, previewOnEdit = true) {
   const dom = new JSDOM(
     `<html data-ycs-stage="stage-1" data-ycs-project="Stage1" data-ycs-rundown="Show"><head></head><body><div id="controllerPluginButtons"></div><iframe id="previewIF"></iframe>
     <div class="itemrow inFocus" data-spx-epoch="ticker"><div class="truncate"></div><div id="Expanded" style="display:block"></div>
@@ -73,6 +73,7 @@ async function controller(t, compact = false) {
       };
     } else if (url.endsWith('/editor'))
       payload = {
+        previewOnEdit,
         revision,
         links: {
           f5: { mode: 'manual', manual: 'MANUAL ROUND' },
@@ -493,4 +494,29 @@ test('external Preview changes clear only stale markers, and a failed preview pe
     before + 1,
     'an already visible preview should not replay on every click'
   );
+});
+
+test('templates can defer checkbox, text and link edits until an explicit command', async t => {
+  const r = await controller(t, true, false);
+  await useNativeFocus(r);
+  r.row.addEventListener('click', () => r.window.focusRow(r.row));
+  r.row.classList.remove('inFocus');
+  const checkbox = r.row.querySelector('[data-update="f2"]');
+  checkbox.click();
+  assert.equal(r.row.classList.contains('inFocus'), true, 'editing focuses the item without previewing it');
+  const text = r.row.querySelector('[data-update="f5"]');
+  text.value = 'DRAFT TITLE';
+  text.dispatchEvent(new r.window.Event('input', { bubbles: true }));
+  r.row.querySelector('[data-update="f5"]').closest('.ycs-link-field').querySelector('button').click();
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.equal(r.posts.length, 0, 'neither editing nor linking sends Preview or Play');
+  assert.equal(r.row.dataset.spxChanged, 'true');
+  await r.window.previewItem(r.row);
+  assert.ok(r.posts.at(-1).url.endsWith('/preview'));
+  assert.equal(r.posts.at(-1).body.fields.find(field => field.field === 'f2').value, '0');
+  assert.equal(r.row.dataset.spxChanged, 'true', 'preview does not save the draft');
+  await r.window.playItem(r.row, 'play');
+  assert.ok(r.posts.at(-1).url.endsWith('/play'));
+  await r.window.updateItem(r.row);
+  assert.ok(r.posts.at(-1).url.endsWith('/update'));
 });

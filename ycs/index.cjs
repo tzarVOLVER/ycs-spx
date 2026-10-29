@@ -92,8 +92,13 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     res.sendFile(path.join(__dirname, 'public/data-manager.html'))
   );
   app.use('/ycs', express.static(path.join(__dirname, 'public')));
-  if (settings.graphicsRoot)
-    app.use('/templates/ycs/ticker', express.static(path.resolve(settings.graphicsRoot)));
+  if (settings.graphicsRoot) {
+    // The graphics repository/package keeps reusable helpers and templates beside ticker.
+    const root = path.resolve(settings.graphicsRoot);
+    app.use('/templates/ycs/ticker', express.static(root));
+    for (const folder of ['shared', 'lower-third'])
+      app.use('/templates/ycs/' + folder, express.static(path.join(root, '..', folder)));
+  }
   app.use('/templates/ycs-system', express.static(path.join(__dirname, 'templates')));
   app.get(
     '/output/:stage/:mode',

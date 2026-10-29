@@ -142,7 +142,7 @@ class Playback extends EventEmitter {
       const saved = item.ycsLinks?.[field.field] || { mode: 'manual', manual: field.value ?? '' };
       links[field.field] = { ...saved, source: this.sources?.mapping(stageId, graphicId, field.field, item.relpath) || null };
     }
-    return { revision: item.ycsEditRevision || 0, title: item.ycsNickname || item.description || graphicId, nickname: item.ycsNickname || '', slot: item.ycsSlot || null, slotConfigured: Object.hasOwn(this.slots, item.ycsSlot), templateTitle: path.basename(item.relpath).replace(/\.html?$/i, ''), template: item.relpath, fields: clone(item.DataFields), links };
+    return { revision: item.ycsEditRevision || 0, title: item.ycsNickname || item.description || graphicId, nickname: item.ycsNickname || '', slot: item.ycsSlot || null, slotConfigured: Object.hasOwn(this.slots, item.ycsSlot), templateTitle: path.basename(item.relpath).replace(/\.html?$/i, ''), template: item.relpath, previewOnEdit: item.ycsPreviewOnEdit !== false, fields: clone(item.DataFields), links };
   }
   async mappingPreview(stageId,graphicId,edits=[]) {
     await this.sources?.ready;
