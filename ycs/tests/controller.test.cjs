@@ -328,3 +328,84 @@ test('compact native editor preserves field nodes and values, keeps checkbox edi
   assert.equal(saved.body.fields.find((field) => field.field === 'f14').value, '[]');
   assert.equal(r.closed(), 1);
 });
+
+test('duplicating imports and initializes a fresh saved row without disturbing original drafts or command URLs', async (t) => {
+  const r = await controller(t, true),
+    input = r.row.querySelector('[data-update="f5"]');
+  input.value = 'UNSAVED ORIGINAL';
+  r.row.dataset.spxChanged = 'true';
+  const hidden = r.window.document.createElement('input');
+  hidden.id = 'datafile';
+  hidden.value = 'Stage1/data/Show.json';
+  r.window.document.body.append(hidden);
+  const originalFetch = r.window.fetch,
+    copied = [];
+  let cloneID,
+    duplicates = 0;
+  Object.defineProperty(r.window.navigator, 'clipboard', {
+    value: { writeText: async (value) => copied.push(value) }
+  });
+  r.window.fetch = async (url, options) => {
+    if (url === '/gc/Stage1/Show' && options.method === 'POST') {
+      duplicates++;
+      const data = JSON.parse(options.body);
+      assert.equal(data.sourceEpoch, 'ticker');
+      cloneID = data.cloneEpoch;
+      assert.notEqual(cloneID, 'ticker');
+      return { ok: true };
+    }
+    if (url === '/gc/Stage1/Show')
+      return {
+        ok: true,
+        text: async () => `<html><body>
+      <div class="itemrow" data-spx-epoch="${cloneID}" data-spx-changed="false">
+        <div class="truncate"></div><div id="Expanded" style="display:block">
+          <table><tbody><tr><td colspan="3" class="spxTableHeadsmall"><span>YCS TICKER 1</span></td></tr>
+          <tr><td width="65%"><input data-update="f0" type="hidden" value="broadcast-1">
+          <input data-update="f5" class="gcinput" value="SAVED DATA"></td>
+          <td width="35%"><button onclick="saveTemplateItemChangesByElement(this.closest('.itemrow'))">Save</button></td></tr></tbody></table>
+        </div><input name="RundownItem[onair]" value="false">
+        <span data-spx-name="icon"></span><button data-spx-name="updatebutton"></button>
+      </div></body></html>`
+      };
+    return originalFetch(url, options);
+  };
+  const [copy] = await Promise.all([
+    r.window.duplicateRundownItem(r.row),
+    r.window.duplicateRundownItem(r.row)
+  ]);
+  assert.equal(duplicates, 1);
+  assert.ok(copy);
+  assert.equal(copy.dataset.spxEpoch, cloneID);
+  assert.equal(input.value, 'UNSAVED ORIGINAL');
+  assert.equal(r.row.dataset.spxChanged, 'true');
+  assert.equal(r.posts.length, 0);
+  assert.notEqual(copy.querySelector('[data-update="f5"]').id, input.id);
+  assert.equal(copy.querySelectorAll('.ycs-companion-tools').length, 1);
+  copy.querySelector('.ycs-companion-tools button').click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(copied.at(-1), 'http://localhost/api/Stage1/Show/' + cloneID + '/play');
+  await r.window.playItem(copy, 'play');
+  assert.equal(r.posts.at(-1).url, '/api/ycs/stages/stage-1/graphics/' + cloneID + '/play');
+  assert.equal(r.posts.at(-1).body.fields.find((f) => f.field === 'f5').value, 'MANUAL ROUND');
+  assert.equal(input.value, 'UNSAVED ORIGINAL');
+  copy.querySelector('[aria-label="Edit nickname"]').click();
+  assert.equal(copy.querySelector('.ycs-nickname-form').hidden, false);
+});
+test('a rejected duplicate never adds a dead row or executes playout', async (t) => {
+  const r = await controller(t, true),
+    hidden = r.window.document.createElement('input');
+  hidden.id = 'datafile';
+  hidden.value = 'Show.json';
+  r.window.document.body.append(hidden);
+  const originalFetch = r.window.fetch;
+  r.window.fetch = async (url, options) =>
+    url === '/gc/Stage1/Show' ? { ok: false } : originalFetch(url, options);
+  await r.window.duplicateRundownItem(r.row);
+  assert.equal(r.window.document.querySelectorAll('.itemrow').length, 1);
+  assert.equal(r.posts.length, 0);
+  assert.match(
+    r.window.document.querySelector('.ycs-command-status').textContent,
+    /Could not duplicate/
+  );
+});

@@ -160,6 +160,7 @@ if (stage) {
       }
       paintLink(row, model);
     }).catch(error => { notify(error.message, true); throw error; }); model.ready.catch(() => {});
+    return model.ready;
   }
   function editNickname(row, model, nickname) {
     const operation=model.queue.then(async()=>{
@@ -219,6 +220,46 @@ if (stage) {
     return send(row, forced || (active.has(row.dataset.spxEpoch) ? 'stop' : 'play'));
   };
   window.nextItem = row => send(row || window.getFocusedRow(), 'continue');
+  // Wait for the saved copy, then import a fresh native row. cloneNode would
+  // copy enhanced markup without its listeners, model or updated identifiers.
+  const duplicating = new WeakSet();
+  window.duplicateRundownItem = async row => {
+    row ||= window.getFocusedRow();
+    if (!row || duplicating.has(row)) return;
+    duplicating.add(row);
+    let saved = false;
+    try {
+      await models.get(row.dataset.spxEpoch)?.queue;
+      const datafile = document.getElementById('datafile')?.value;
+      if (!datafile) throw new Error('Rundown file is unavailable. Reload before duplicating.');
+      const id = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() :
+        Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
+      const response = await fetch(location.pathname, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: 'duplicateRundownItem', sourceEpoch: row.dataset.spxEpoch,
+          cloneEpoch: id, foldername: project, listname: rundown, datafile })
+      });
+      if (!response.ok) throw new Error('Could not duplicate this item.');
+      saved = true;
+      const page = await fetch(location.pathname, { cache: 'no-store' });
+      if (!page.ok) throw new Error('Could not load the saved copy.');
+      const documentCopy = new DOMParser().parseFromString(await page.text(), 'text/html');
+      const nativeRow = [...documentCopy.querySelectorAll('.itemrow')].find(item => item.dataset.spxEpoch === id);
+      if (!nativeRow || !row.isConnected || disposed) throw new Error('Reload to display the saved copy.');
+      const copy = document.importNode(nativeRow, true);
+      row.after(copy);
+      window.updateFormIndexes?.();
+      await initialize(copy);
+      if (row.classList.contains('inFocus')) {
+        row.classList.remove('inFocus'); copy.classList.add('inFocus');
+        window.setMasterButtonStates?.(copy);
+      }
+      notify('Item duplicated.');
+      return copy;
+    } catch (error) {
+      if (!disposed) notify(saved ? 'Copy saved. Reload the rundown to finish loading it. ' + error.message : error.message, true);
+    } finally { duplicating.delete(row); }
+  };
   // Keep the native Caps Lock overlay's copy shortcuts on the same stage API.
   window.copyItemID = (item, action = '') => {
     try {

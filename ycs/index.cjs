@@ -5,6 +5,7 @@ const { Playback, RundownRepository, prepareEdits } = require('./playback.cjs');
 const { DataSources, linkable } = require('./data.cjs');
 const { LocalFiles } = require('./local-files.cjs');
 const { Renderers } = require('./renderers.cjs');
+const outputAccess = require('./output-access.cjs');
 
 module.exports = function registerYCS(app, config, hooks = {}) {
   if (!config.ycs?.enabled) return;
@@ -99,7 +100,21 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     auth.CheckLogin,
     handlers(async (req, res) => {
       playback.snapshot(req.params.stage, req.params.mode);
+      outputAccess.grant(req, req.params.stage, req.params.mode);
       res.sendFile(path.join(__dirname, 'public/output.html'));
+    })
+  );
+  router.post(
+    '/stages/:stage/:mode/report',
+    sameOrigin,
+    (req, res, next) =>
+      outputAccess.allowed(req, config, req.params.stage, req.params.mode)
+        ? next()
+        : apiAccess(req, res, next),
+    handlers(async (req, res) => {
+      playback.snapshot(req.params.stage, req.params.mode);
+      renderers.report(req.params.stage, req.params.mode, req.body);
+      res.sendStatus(204);
     })
   );
   router.use(sameOrigin, apiAccess);
@@ -267,14 +282,6 @@ module.exports = function registerYCS(app, config, hooks = {}) {
       res.json(renderers.snapshot(req.params.stage, playback.state(req.params.stage).revision))
     )
   );
-  router.post(
-    '/stages/:stage/:mode/report',
-    handlers(async (req, res) => {
-      playback.snapshot(req.params.stage, req.params.mode);
-      renderers.report(req.params.stage, req.params.mode, req.body);
-      res.sendStatus(204);
-    })
-  );
   router.get(
     '/stages/:stage/:mode/state',
     handlers(async (req, res) => res.json(playback.snapshot(req.params.stage, req.params.mode)))
@@ -333,7 +340,7 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     '/api/:project/:rundown/:graphic/:action',
     // Leave existing API namespaces to their own routers, including removed
     // endpoints that must remain 404 rather than becoming item commands.
-    (req, res, next) => ['ycs', 'v1'].includes(req.params.project) ? next('route') : next(),
+    (req, res, next) => (['ycs', 'v1'].includes(req.params.project) ? next('route') : next()),
     (req, res, next) => {
       res.set('Cache-Control', 'no-store');
       // Express normally runs GET handlers for HEAD too. Control URLs must

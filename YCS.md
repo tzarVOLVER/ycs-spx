@@ -8,6 +8,12 @@ The initial implementation keeps SPX's normal rundown editor and HTML template l
 
 ### Runtime correctness fixes
 
+Output pages grant their authenticated browser session read access only to the opened stage/mode and its health reports. In the default no-login mode this uses SPX's default session, allowing remote output windows without exposing a command token. Viewer sockets cannot subscribe to another output or controller-focus events, and output grants do not authorize data or playout APIs. Operator/API authorization, origin checks and network binding are unchanged. Reconnect failures renew only the output page session, retaining frames across an in-memory session reset.
+
+The compositor uses independent per-slot workers. Stop/replacement/restart cancels pending mounts before a stale Play can run; active data updates remain serial and preserve their iframe. New frames stay hidden until initial data is ready. A failed slot retains its previous graphic, reports the error, and receives at most three automatic retries (250 ms, 1 s, 3 s) before awaiting another snapshot. Other slots continue; Stop cancels retries. Shutdown aborts pending work and releases frames/timers.
+
+Duplicating from a configured stage waits for the saved copy, fetches fresh native markup, and initializes its editor model, link/nickname handlers and Companion URLs. Original field drafts remain in place; there is no full-page reload or playout. Duplicate-save failures add no unusable row, while a saved copy that fails to load produces an explicit reload message.
+
 Output renderer IDs support ordinary LAN HTTP origins where `crypto.randomUUID` is unavailable. This does not change network binding, authentication, or the need for a later venue/vMix rehearsal.
 
 Editor revisions advance only when saved field values or manual/linked settings change. Companion Play/Stop/Toggle/Update using saved values leaves an open editor valid. Real competing content edits still return 409; preview never advances the saved editor revision.
