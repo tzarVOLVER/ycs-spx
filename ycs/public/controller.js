@@ -89,6 +89,7 @@ if (stage) {
     const heading=document.createElement('div');heading.className='ycs-editor-heading';const headingTitle=document.createElement('div');headingTitle.className='ycs-editor-title';
     const nativeTitle=row.querySelector('#Expanded td[colspan="3"].spxTableHeadsmall');
     if(nativeTitle){while(nativeTitle.firstChild)headingTitle.append(nativeTitle.firstChild);nativeTitle.closest('tr').hidden=true;}else headingTitle.textContent=editor.title||row.dataset.spxEpoch;
+    const folderTools=[];
     for(const icon of headingTitle.querySelectorAll('.l-icon')){
       // Font Awesome observes its generated SVG nodes. A fresh wrapper prevents
       // it from replacing the local Lucide icon after a class/path change.
@@ -96,8 +97,25 @@ if (stage) {
       for(const name of ['disabled','HIDE','hide','hidden'])if(icon.classList.contains(name))replacement.classList.add(name);
       replacement.hidden=icon.hidden;replacement.style.cssText=icon.style.cssText;
       for(const name of ['onclick','onmouseover','onmouseout'])if(icon.hasAttribute(name))replacement.setAttribute(name,icon.getAttribute(name));
-      replacement.innerHTML=iconMarkup('square-pen');replacement.title=icon.classList.contains('disabled')?'Template folder access is disabled':'Open template folder';icon.replaceWith(replacement);
+      replacement.innerHTML=iconMarkup('folder-open');replacement.title=icon.classList.contains('disabled')?'Template folder access is disabled':'Open template folder';icon.replaceWith(replacement);folderTools.push(replacement);replacement.remove();
     }
+    let name=headingTitle.querySelector('[data-ycs-item-title]') || headingTitle.querySelector('span');
+    if(!name){name=document.createElement('span');name.textContent=headingTitle.textContent;headingTitle.replaceChildren(name);}
+    name.dataset.ycsItemTitle='';
+    model.templateTitle=editor.templateTitle || name.textContent;
+    name.textContent=model.nickname || model.templateTitle;
+    const rename=document.createElement('button');rename.type='button';rename.className='ycs-nickname-edit';rename.setAttribute('aria-label','Edit nickname');rename.title='Edit rundown nickname · Graphic ID stays unchanged';rename.innerHTML=iconMarkup('square-pen');headingTitle.append(rename);
+    const renameForm=document.createElement('div');renameForm.className='ycs-nickname-form';renameForm.hidden=true;
+    const nicknameInput=document.createElement('input');nicknameInput.type='text';nicknameInput.maxLength=100;nicknameInput.placeholder=model.templateTitle;nicknameInput.setAttribute('aria-label','Rundown nickname');
+    const saveNickname=document.createElement('button');saveNickname.type='button';saveNickname.textContent='Save';saveNickname.setAttribute('aria-label','Save nickname');
+    const cancelNickname=document.createElement('button');cancelNickname.type='button';cancelNickname.textContent='Cancel';cancelNickname.setAttribute('aria-label','Cancel nickname');
+    renameForm.append(nicknameInput,saveNickname,cancelNickname);headingTitle.append(renameForm);
+    const closeRename=()=>{if(saveNickname.disabled)return;renameForm.hidden=true;name.hidden=false;rename.hidden=false;rename.focus();};
+    rename.addEventListener('click',event=>{event.stopPropagation();nicknameInput.value=model.nickname;name.hidden=true;rename.hidden=true;renameForm.hidden=false;nicknameInput.focus();nicknameInput.select();});
+    cancelNickname.addEventListener('click',event=>{event.stopPropagation();closeRename();});
+    saveNickname.addEventListener('click',async event=>{event.stopPropagation();saveNickname.disabled=true;cancelNickname.disabled=true;nicknameInput.disabled=true;let saved=false;try{await editNickname(row,model,nicknameInput.value);saved=true;}catch{/* Keep the form open for correction; the queue reports the error. */}finally{saveNickname.disabled=false;cancelNickname.disabled=false;nicknameInput.disabled=false;}if(saved)closeRename();else nicknameInput.focus();});
+    renameForm.addEventListener('keydown',event=>{event.stopPropagation();if(event.key==='Enter'){event.preventDefault();if(!saveNickname.disabled)saveNickname.click();}else if(event.key==='Escape'){event.preventDefault();closeRename();}});
+    renameForm.addEventListener('keyup',event=>event.stopPropagation());
     const toggles=document.createElement('div');toggles.className='ycs-editor-toggles';heading.append(headingTitle,toggles);content.append(heading);
     const advanced = document.createElement('details'); advanced.className = 'ycs-advanced'; advanced.innerHTML = '<summary>Appearance & timing</summary>';
     const badge = document.createElement('span'); badge.className = 'ycs-pending'; badge.hidden = true; model.badge = badge;
@@ -116,12 +134,12 @@ if (stage) {
     const save = row.querySelector('button[onclick*="saveTemplateItemChangesByElement"]'); if (save) { save.textContent = 'Save draft'; save.title = 'Save without changing program'; }
     const update = row.querySelector('[data-spx-name="updatebutton"]'); if (update) { update.textContent = 'Update on air'; update.title = 'Apply this draft and its field links to program'; }
     const siblingCells=[...cell.parentElement.children].filter(sibling=>sibling!==cell),nativeActions=siblingCells.flatMap(sibling=>[...sibling.querySelectorAll('button,.l-icon')]);
-    if(nativeActions.length){const footer=document.createElement('div');footer.className='ycs-editor-footer';const actions=document.createElement('div');actions.className='ycs-editor-actions';const tools=document.createElement('div');tools.className='ycs-editor-tools';for(const action of nativeActions)(action.tagName==='BUTTON'?actions:tools).append(action);footer.append(manager,actions,tools);cell.append(footer);for(const sibling of siblingCells)sibling.hidden=true;cell.colSpan=siblingCells.length+1;cell.setAttribute('width','100%');}
+    if(nativeActions.length){const footer=document.createElement('div');footer.className='ycs-editor-footer';const actions=document.createElement('div');actions.className='ycs-editor-actions';const tools=document.createElement('div');tools.className='ycs-editor-tools';for(const action of [...nativeActions,...folderTools])(action.tagName==='BUTTON'?actions:tools).append(action);footer.append(manager,actions,tools);cell.append(footer);for(const sibling of siblingCells)sibling.hidden=true;cell.colSpan=siblingCells.length+1;cell.setAttribute('width','100%');}
   }
   function initialize(row) {
     const id = row.dataset.spxEpoch, model = { links: {}, widgets: {}, revision: 0, queue: Promise.resolve() }; models.set(id, model);
     model.ready = request(`/api/ycs/stages/${stage}/graphics/${encodeURIComponent(id)}/editor`).then(editor => {
-      model.links = editor.links; model.revision = editor.revision; model.template = editor.template; organize(row, editor, model);
+      model.links = editor.links; model.revision = editor.revision; model.template = editor.template; model.nickname=editor.nickname || ''; organize(row, editor, model);
       for (const [field, link] of Object.entries(model.links)) {
         const input = row.querySelector(`[data-update="${field}"]`); if (!input) continue;
         const title = editor.fields?.find(item => item.field === field)?.title || input.placeholder || 'Current round';
@@ -139,6 +157,17 @@ if (stage) {
       }
       paintLink(row, model);
     }).catch(error => { notify(error.message, true); throw error; }); model.ready.catch(() => {});
+  }
+  function editNickname(row, model, nickname) {
+    const operation=model.queue.then(async()=>{
+      await model.ready;
+      const result=await request(`/api/ycs/stages/${stage}/graphics/${encodeURIComponent(row.dataset.spxEpoch)}/nickname`,{nickname,revision:model.revision});
+      model.nickname=result.nickname;model.revision=result.editorRevision;
+      for(const title of row.querySelectorAll('[data-ycs-item-title]'))title.textContent=result.nickname || model.templateTitle;
+      notify('Nickname saved. Graphic ID unchanged.');
+    });
+    model.queue=operation.catch(error=>notify(error.message,true));
+    return operation;
   }
   function send(row, action) {
     if (!row) return Promise.resolve();

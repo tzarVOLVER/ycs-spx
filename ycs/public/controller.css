@@ -47,6 +47,11 @@
 .ycs-editor-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px;min-height:24px}
 .ycs-editor-title{display:flex;align-items:center;gap:7px;color:#e1e7eb;font:400 14px/1.4 Arial,sans-serif;text-transform:uppercase}
 .ycs-editor-title .l-icon{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:#a8bbc9;margin:0;font-style:normal}.ycs-editor-title .l-icon:hover{color:#e1e7eb}.ycs-editor-title .ycs-editor-icon{width:14px;height:14px}
+.ycs-nickname-edit{display:inline-flex;align-items:center;justify-content:center;flex:0 0 24px;width:24px;height:24px;padding:3px;border:0;border-radius:3px;background:transparent;color:#b8ccd9;cursor:pointer}
+.ycs-nickname-edit:hover{color:#fff;background:#ffffff12}.ycs-nickname-edit:focus-visible{outline:2px solid #8ebacb;outline-offset:1px}
+.ycs-nickname-form{display:flex;align-items:center;gap:6px;max-width:100%;text-transform:none}.ycs-nickname-form[hidden],.ycs-editor-title>[hidden]{display:none!important}
+.ycs-nickname-form input{width:220px;max-width:40vw;min-width:90px;height:29px;box-sizing:border-box;padding:4px 7px;border:1px solid #aab5bc;border-radius:3px;background:#fff;color:#172630;font:13px/1.3 Arial,sans-serif}
+.ycs-nickname-form button{height:29px;margin:0;padding:4px 8px;border:1px solid #647c8c;border-radius:3px;background:#354852;color:#eef3f5;font:12px/1.3 Arial,sans-serif;cursor:pointer}.ycs-nickname-form button:disabled{opacity:.6;cursor:wait}
 .ycs-editor-toggles{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:6px 12px;margin-left:auto}
 .ycs-editor-field{display:grid;grid-template-columns:112px minmax(0,1fr);align-items:center;gap:0 8px;margin:0 0 7px;font:13px/1.3 Arial,sans-serif}
 .ycs-editor-field>label{display:block;width:auto!important;height:auto!important;min-height:0;color:#c1cfda;font-size:12px;line-height:1.3;margin:0}

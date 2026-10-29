@@ -68,7 +68,8 @@ async function controller(t, compact = false) {
         };
       const action = url.split('/').at(-1);
       payload = {
-        editorRevision: action === 'stop' ? 99 : action === 'preview' ? revision : ++revision
+        editorRevision: action === 'stop' ? 99 : action === 'preview' ? revision : ++revision,
+        ...(action === 'nickname' ? { nickname: body.nickname.trim() } : {})
       };
     } else if (url.endsWith('/editor'))
       payload = {
@@ -108,7 +109,9 @@ async function controller(t, compact = false) {
   };
   await require('./helpers/browser.cjs').loadContract(window);
   window.eval(await fs.readFile(path.join(__dirname, '../public/stage-panel.js'), 'utf8'));
-  window.eval("'use strict';\n" + await fs.readFile(path.join(__dirname, '../public/controller.js'), 'utf8'));
+  window.eval(
+    "'use strict';\n" + (await fs.readFile(path.join(__dirname, '../public/controller.js'), 'utf8'))
+  );
   t.after(() => {
     window.dispatchEvent(new window.Event('pagehide'));
     window.close();
@@ -180,6 +183,52 @@ test('native Save closes the editor; Stop does not silently refresh a stale edit
   assert.equal(r.posts.at(-1).body.revision, 1);
 });
 
+test('nickname editing changes only display metadata, preserves unsaved field edits and supports Cancel and clearing', async (t) => {
+  const r = await controller(t, true),
+    edit = r.row.querySelector('.ycs-nickname-edit'),
+    input = r.row.querySelector('[data-update="f5"]');
+  assert.equal(edit.disabled, false);
+  assert.equal(edit.getAttribute('aria-label'), 'Edit nickname');
+  edit.click();
+  r.row.querySelector('[aria-label="Cancel nickname"]').click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(r.posts.length, 0);
+  const escaped=[];
+  r.window.document.addEventListener('keydown',event=>escaped.push(event.key));
+  edit.click();
+  r.row.querySelector('[aria-label="Rundown nickname"]').dispatchEvent(new r.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+  assert.equal(r.row.querySelector('.ycs-nickname-form').hidden,true);
+  assert.deepEqual(escaped,[]);
+  input.value = 'UNSAVED ROUND';
+  r.row.dataset.spxChanged = 'true';
+  edit.click();
+  r.row.querySelector('[aria-label="Rundown nickname"]').value='  Player <b>A</b>  ';
+  r.row.querySelector('[aria-label="Save nickname"]').click();
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(r.posts.at(-1).url, '/api/ycs/stages/stage-1/graphics/ticker/nickname');
+  assert.deepEqual(Object.keys(r.posts.at(-1).body).sort(), ['nickname', 'revision']);
+  assert.equal(r.row.querySelector('[data-ycs-item-title]').textContent, 'Player <b>A</b>');
+  assert.equal(r.row.querySelector('[data-ycs-item-title] b'), null);
+  assert.equal(r.row.dataset.spxEpoch, 'ticker');
+  assert.equal(r.row.dataset.spxChanged, 'true');
+  assert.equal(input.value, 'UNSAVED ROUND');
+  await r.window.saveTemplateItemChangesByElement(r.row);
+  assert.equal(r.posts.at(-1).body.revision, 1);
+  edit.click();
+  r.row.querySelector('[aria-label="Rundown nickname"]').value='';
+  r.row.querySelector('[aria-label="Save nickname"]').click();
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(r.row.querySelector('[data-ycs-item-title]').textContent, 'YCS TICKER 1');
+  assert.ok(
+    r.posts.every(
+      (post) =>
+        !post.url.endsWith('/play') &&
+        !post.url.endsWith('/update') &&
+        !post.url.endsWith('/preview')
+    )
+  );
+});
+
 test('compact native editor preserves field nodes and values, keeps checkbox editing and link changes off air, and saves all advanced fields', async (t) => {
   const r = await controller(t, true),
     input = r.row.querySelector('[data-update="f5"]'),
@@ -191,7 +240,7 @@ test('compact native editor preserves field nodes and values, keeps checkbox edi
   );
   assert.equal(r.posts.length, 0);
   assert.ok(r.row.querySelector('.ycs-editor-heading').contains(checkbox));
-  assert.equal(r.row.querySelector('.ycs-editor-title').textContent, 'YCS TICKER 1');
+  assert.equal(r.row.querySelector('[data-ycs-item-title]').textContent, 'YCS TICKER 1');
   assert.equal(
     r.row.querySelector('.ycs-editor-title use').getAttribute('href'),
     '/ycs/editor-icons.svg#square-pen'

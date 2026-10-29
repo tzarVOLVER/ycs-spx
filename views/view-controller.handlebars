@@ -608,7 +608,7 @@
                       <table class="wide" style="border-spacing: 2px; margin-top: 2px;">
                         <TR>
                           <TD colspan="2" class="vmid spxTableHeadsmall" style="height: 1.6em; text-transform:uppercase;">
-                            <span><!--item {{@index}} &nbsp;&middot;&nbsp;-->{{{ nameFromTemplatePath relpath }}}
+                            <span><span data-ycs-item-title>{{#if ycsNickname}}{{ycsNickname}}{{else}}{{{ nameFromTemplatePath relpath }}}{{/if}}</span>
                               {{#if description}}
                               <span class="delim"></span> <span style="opacity:0.5;">{{description}}</span>
                               {{/if}}
@@ -633,7 +633,7 @@
                       <table class="wide" style="border-spacing: 2px; margin-top:2px;">
                         <TR>
                           <TD colspan="3" class="vmid spxTableHeadsmall" style="height: 1.6em; text-transform:uppercase;">
-                            <span>{{{nameFromTemplatePath relpath}}}</span>&nbsp;&nbsp;
+                            <span data-ycs-item-title>{{#if ycsNickname}}{{ycsNickname}}{{else}}{{{nameFromTemplatePath relpath}}}{{/if}}</span>&nbsp;&nbsp;
 
                             <!-- disabled by default, enable with config -->
                             <i class="l-icon fas fa-edit {{{allowOpeningFolder}}}" onClick="openRelpathFolder(this.closest('.itemrow'));"  onmouseover="tip('{{lang 'button.edit'}}');"></i>

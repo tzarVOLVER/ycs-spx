@@ -248,6 +248,19 @@ module.exports = function registerYCS(app, config, hooks = {}) {
       res.json(await playback.editor(req.params.stage, req.params.graphic))
     )
   );
+  router.post(
+    '/stages/:stage/graphics/:graphic/nickname',
+    handlers(async (req, res) =>
+      res.json(
+        await playback.rename(
+          req.params.stage,
+          req.params.graphic,
+          req.body.nickname,
+          req.body.revision
+        )
+      )
+    )
+  );
   router.get(
     '/stages/:stage/health',
     handlers(async (req, res) =>

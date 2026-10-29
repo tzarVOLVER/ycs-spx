@@ -132,7 +132,7 @@ class Playback extends EventEmitter {
   async catalog(stageId) {
     await this.sources?.ready;
     const rundown = await this.repository.read(stageId);
-    return rundown.templates.map(item => ({ id:item.itemID,title:item.description||item.itemID,slot:item.ycsSlot,template:item.relpath,fields:item.DataFields.filter(field=>linkable(item,field.field)).map(field=>({field:field.field,title:field.title||field.field,ftype:field.ftype,type:types[field.ftype],required:field.required===true,...(field.ycsCollection?{ycsCollection:field.ycsCollection,type:'Story list'}:{})})),mapped:item.DataFields.filter(field=>linkable(item,field.field)&&this.sources?.mapping(stageId,item.itemID,field.field,item.relpath)).length }));
+    return rundown.templates.map(item => ({ id:item.itemID,title:item.ycsNickname||item.description||item.itemID,slot:item.ycsSlot,template:item.relpath,fields:item.DataFields.filter(field=>linkable(item,field.field)).map(field=>({field:field.field,title:field.title||field.field,ftype:field.ftype,type:types[field.ftype],required:field.required===true,...(field.ycsCollection?{ycsCollection:field.ycsCollection,type:'Story list'}:{})})),mapped:item.DataFields.filter(field=>linkable(item,field.field)&&this.sources?.mapping(stageId,item.itemID,field.field,item.relpath)).length }));
   }
   async editor(stageId, graphicId) {
     await this.sources?.ready;
@@ -142,7 +142,7 @@ class Playback extends EventEmitter {
       const saved = item.ycsLinks?.[field.field] || { mode: 'manual', manual: field.value ?? '' };
       links[field.field] = { ...saved, source: this.sources?.mapping(stageId, graphicId, field.field, item.relpath) || null };
     }
-    return { revision: item.ycsEditRevision || 0, title: item.description || graphicId, template: item.relpath, fields: clone(item.DataFields), links };
+    return { revision: item.ycsEditRevision || 0, title: item.ycsNickname || item.description || graphicId, nickname: item.ycsNickname || '', templateTitle: path.basename(item.relpath).replace(/\.html?$/i, ''), template: item.relpath, fields: clone(item.DataFields), links };
   }
   async mappingPreview(stageId,graphicId,edits=[]) {
     await this.sources?.ready;
@@ -167,7 +167,25 @@ class Playback extends EventEmitter {
       graphic.data[field.field]=value;
       return {field:field.field,title:field.title||field.field,ftype:field.ftype,type:types[field.ftype],required:field.required===true,...(field.ycsCollection?{ycsCollection:field.ycsCollection,type:'Story list'}:{}),manual:String(field.value??''),binding:pick,origin:effective.origin,value,health,error,...(collection?{collection}:{})};
     }));
-    return {revision:this.sources.snapshot().revision,template:item.relpath,title:item.description||graphicId,graphic,fields};
+    return {revision:this.sources.snapshot().revision,template:item.relpath,title:item.ycsNickname||item.description||graphicId,graphic,fields};
+  }
+  rename(stageId, graphicId, nickname, revision) {
+    if (typeof nickname !== 'string' || nickname.length > 100 || /[\u0000-\u001f\u007f]/.test(nickname)) fail('Use a nickname of up to 100 characters on one line', 422);
+    if (!Number.isInteger(revision) || revision < 0) fail('An editor revision is required', 400);
+    const name = nickname.trim();
+    return this.queue(stageId, async () => {
+      const rundown = await this.repository.read(stageId);
+      const item = this.repository.item(rundown, graphicId);
+      if (revision !== (item.ycsEditRevision || 0)) fail('This graphic was saved in another controller. Reload before continuing.', 409);
+      if ((item.ycsNickname || '') !== name) {
+        if (name) item.ycsNickname = name; else delete item.ycsNickname;
+        item.ycsEditRevision = revision + 1;
+        await this.repository.write(stageId, rundown);
+      }
+      // Operator metadata only: preserve IDs, bindings, manual values and both
+      // output snapshots, including an unsaved preview already on the server.
+      return { nickname: name, editorRevision: item.ycsEditRevision || 0 };
+    });
   }
   command(stageId, graphicId, action, fields, options = {}) {
     if (!['play', 'stop', 'toggle', 'update', 'preview', 'save', 'continue'].includes(action)) fail('Unknown command');
