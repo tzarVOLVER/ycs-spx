@@ -199,7 +199,7 @@ if (stage) {
       }
       return result;
     });
-    model.queue = operation.catch(error => { validationRow = error.fields ? row : null; fieldErrors(row, error.fields); notify(error.message, true); });
+    model.queue = operation.catch(error => { if (action === 'preview') row.dataset.spxPreviewing = 'false'; validationRow = error.fields ? row : null; fieldErrors(row, error.fields); notify(error.message, true); });
     return model.queue;
   }
   function schedulePreview(row) { clearTimeout(timers.get(row)); timers.set(row, setTimeout(() => send(row, 'preview'), 300)); }
@@ -312,7 +312,13 @@ if (stage) {
   stageEvents.on('state', snapshot => {
     if (snapshot.stage !== stage) return;
     if (snapshot.mode === 'program') syncButtons(snapshot);
-    else if (snapshot.mode === 'preview') stagePanel.setPreview(snapshot);
+    else if (snapshot.mode === 'preview') {
+      // Native focusRow skips rows marked already previewing. Stop Stage (or
+      // another controller) may clear/change Preview while its row stays focused.
+      for (const row of document.querySelectorAll('.itemrow'))
+        row.dataset.spxPreviewing = String(snapshot.selected === row.dataset.spxEpoch);
+      stagePanel.setPreview(snapshot);
+    }
   });
   function disconnected() {
     if (disposed) return;

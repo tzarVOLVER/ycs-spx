@@ -128,6 +128,8 @@ async function controller(t, compact = false) {
     program,
     originalRound,
     focus: (selection) => channels.get('focus')(selection),
+    preview: (selected) =>
+      channels.get('state')({ stage: 'stage-1', mode: 'preview', selected, graphics: [] }),
     closed: () => closed,
     rejectFields: (errors) => {
       validationError = errors;
@@ -420,5 +422,75 @@ test('a rejected duplicate never adds a dead row or executes playout', async (t)
   assert.match(
     r.window.document.querySelector('.ycs-command-status').textContent,
     /Could not duplicate/
+  );
+});
+
+async function useNativeFocus(r) {
+  const source = await fs.readFile(path.join(__dirname, '../../static/js/spx_gc.js'), 'utf8');
+  const start = source.indexOf('function focusRow('),
+    end = source.indexOf('function getFocusedRow()', start);
+  r.window.eval(source.slice(start, end));
+  r.window.getIndexOfRowItem = () => 0;
+  r.row.scrollIntoView = () => {};
+  const mode = r.window.document.createElement('input');
+  mode.id = 'previewMode';
+  mode.value = 'selected';
+  r.window.document.body.append(mode);
+}
+const flushController = async () => {
+  for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
+};
+
+test('Stop Stage clears the preview marker so clicking the same highlighted single item previews again', async (t) => {
+  const r = await controller(t, true);
+  await useNativeFocus(r);
+  r.window.focusRow(r.row);
+  await flushController();
+  assert.equal(r.posts.at(-1).url, '/api/ycs/stages/stage-1/graphics/ticker/preview');
+  r.preview('ticker');
+  assert.equal(r.row.dataset.spxPreviewing, 'true');
+  const input = r.row.querySelector('[data-update="f5"]');
+  input.value = 'LOCAL DRAFT';
+  r.row.dataset.spxChanged = 'true';
+  await r.window.stopAll();
+  assert.equal(r.posts.at(-1).url, '/api/ycs/stages/stage-1/clear');
+  r.program([]);
+  r.preview(null);
+  assert.equal(r.row.classList.contains('inFocus'), true);
+  assert.equal(r.row.dataset.spxPreviewing, 'false');
+  const count = r.posts.length;
+  r.window.focusRow(r.row);
+  await flushController();
+  assert.equal(r.posts.length, count + 1);
+  assert.equal(r.posts.at(-1).url, '/api/ycs/stages/stage-1/graphics/ticker/preview');
+  assert.equal(r.posts.at(-1).body.fields.find((f) => f.field === 'f5').value, 'LOCAL DRAFT');
+  assert.equal(input.value, 'LOCAL DRAFT');
+  assert.equal(r.row.dataset.spxChanged, 'true');
+  assert.ok(r.posts.every((p) => p.url.endsWith('/preview') || p.url.endsWith('/clear')));
+});
+
+test('external Preview changes clear only stale markers, and a failed preview permits click-to-retry', async (t) => {
+  const r = await controller(t);
+  await useNativeFocus(r);
+  r.preview('ticker');
+  r.preview('another-item');
+  assert.equal(r.row.dataset.spxPreviewing, 'false');
+  r.rejectFields({ f5: 'Invalid preview value' });
+  r.window.focusRow(r.row);
+  await flushController();
+  assert.equal(r.row.dataset.spxPreviewing, 'false');
+  r.rejectFields(null);
+  const before = r.posts.length;
+  r.window.focusRow(r.row);
+  await flushController();
+  assert.equal(r.posts.length, before + 1);
+  r.preview('ticker');
+  assert.equal(r.row.dataset.spxPreviewing, 'true');
+  r.window.focusRow(r.row);
+  await flushController();
+  assert.equal(
+    r.posts.length,
+    before + 1,
+    'an already visible preview should not replay on every click'
   );
 });
