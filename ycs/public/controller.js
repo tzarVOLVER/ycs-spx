@@ -1,6 +1,8 @@
 // Native SPX controls use the same stage service as Companion. Links are
 // resolved on the server, with separate editor and on-air binding snapshots.
 const stage = document.documentElement.dataset.ycsStage;
+const project = document.documentElement.dataset.ycsProject;
+const rundown = document.documentElement.dataset.ycsRundown;
 if (stage) {
   const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = '/ycs/controller.css'; document.head.append(css);
   const stagePanel = new window.YCSStagePanel({ stage, onStop: clearStage });
@@ -140,7 +142,7 @@ if (stage) {
     const id = row.dataset.spxEpoch, model = { links: {}, widgets: {}, revision: 0, queue: Promise.resolve() }; models.set(id, model);
     model.ready = request(`/api/ycs/stages/${stage}/graphics/${encodeURIComponent(id)}/editor`).then(editor => {
       model.links = editor.links; model.revision = editor.revision; model.template = editor.template; model.nickname=editor.nickname || ''; organize(row, editor, model);
-      window.YCSCompanionTools({ row, stage, editor, copyText: (...args) => stagePanel.copyText(...args) });
+      window.YCSCompanionTools({ row, project, rundown, editor, copyIcon: stagePanel.icon('copy'), copyText: (...args) => stagePanel.copyText(...args) });
       for (const [field, link] of Object.entries(model.links)) {
         const input = row.querySelector(`[data-update="${field}"]`); if (!input) continue;
         const title = editor.fields?.find(item => item.field === field)?.title || input.placeholder || 'Current round';
@@ -220,7 +222,7 @@ if (stage) {
   // Keep the native Caps Lock overlay's copy shortcuts on the same stage API.
   window.copyItemID = (item, action = '') => {
     try {
-      const text = action ? new URL(window.YCSCompanion.command(stage, item, action.toLowerCase()).path, location.href).href : item;
+      const text = action ? new URL(window.YCSCompanion.command(project, rundown, item, action.toLowerCase()).path, location.href).href : item;
       const copied = stagePanel.copyText(text, action ? 'Companion ' + action + ' URL' : 'Item ID');
       window.showItemIDs?.(false);
       return copied;
@@ -250,7 +252,15 @@ if (stage) {
     stagePanel.setProgram(snapshot);
   }
   const stageEvents = io('/ycs-playback', { transports: ['websocket'], forceNew: true });
-  stageEvents.on('connect', () => stageEvents.emit('subscribe', { stage, modes: ['program', 'preview'] }));
+  stageEvents.on('connect', () => stageEvents.emit('subscribe', { stage, modes: ['program', 'preview'], controller: true }));
+  stageEvents.on('focus', selection => {
+    if (disposed || selection.stage !== stage) return;
+    const row = [...document.querySelectorAll('.itemrow')].find(row => row.dataset.spxEpoch === selection.selected);
+    if (!row) { notify('Selected item is missing. Reload the rundown.', true); return; }
+    for (const item of document.querySelectorAll('.itemrow')) item.classList.toggle('inFocus', item === row);
+    row.scrollIntoView?.({ block: 'nearest' });
+    window.setMasterButtonStates?.(row);
+  });
   stageEvents.on('state', snapshot => {
     if (snapshot.stage !== stage) return;
     if (snapshot.mode === 'program') syncButtons(snapshot);

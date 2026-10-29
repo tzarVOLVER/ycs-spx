@@ -32,27 +32,11 @@ window.YCSStagePanel = class StagePanel {
         <button type="button" class="ycs-clear">${this.icon('stop')}Stop stage</button>
         <a class="ycs-manager-link" href="/ycs/data-manager">Data Manager ↗</a>
       </div>
-      <details class="ycs-companion-download"><summary>Companion button pages</summary>
-        <a data-companion-style="explicit">Download Play / Stop buttons</a>
-        <a data-companion-style="toggle">Download Toggle + Play / Stop buttons</a>
-        <p>Uses the saved rundown items and this server address. In Companion, import selected button pages. Export again after adding or removing items. No credentials are included.</p>
-      </details>
       <div class="ycs-command-status" role="status" aria-live="polite"></div>`;
     this.element.querySelector('.ycs-heading').textContent = this.title;
     this.element.querySelector('.ycs-manager-link').href =
       '/ycs/data-manager?stage=' + encodeURIComponent(stage);
     document.getElementById('controllerPluginButtons')?.prepend(this.element);
-    for (const link of this.element.querySelectorAll('[data-companion-style]')) {
-      link.href =
-        '/api/ycs/stages/' +
-        encodeURIComponent(stage) +
-        '/companion?style=' +
-        link.dataset.companionStyle;
-      link.addEventListener('click', (event) => {
-        event.preventDefault();
-        this.downloadCompanion(link);
-      });
-    }
     const background = document.getElementById('previewBG');
     if (background && this.frame && background.contains(this.frame)) {
       this.monitor = document.createElement('div');
@@ -125,30 +109,6 @@ window.YCSStagePanel = class StagePanel {
   }
   copyOutput(mode) {
     return this.copyText(this.outputURL(mode), this.modeTitle(mode) + ' output URL');
-  }
-  async downloadCompanion(link) {
-    if (this.downloading) return;
-    this.downloading = true;
-    link.setAttribute('aria-disabled', 'true');
-    try {
-      const response = await fetch(link.href, { cache: 'no-store' });
-      if (!response.ok) throw new Error((await response.json()).error || 'Companion export failed');
-      const blob = await response.blob();
-      if (this.disposed) return;
-      const url = URL.createObjectURL(blob),
-        download = document.createElement('a');
-      download.href = url;
-      download.download =
-        'YCS-' + this.stage + '-' + link.dataset.companionStyle + '.companionconfig';
-      download.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      this.notify('Companion buttons downloaded. Import selected button pages.');
-    } catch (error) {
-      if (!this.disposed) this.notify(error.message, true);
-    } finally {
-      this.downloading = false;
-      link.removeAttribute('aria-disabled');
-    }
   }
   async copyText(url, label, elements = {}) {
     const status = elements.status || this.element.querySelector('.ycs-copy-status'),

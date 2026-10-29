@@ -1,180 +1,157 @@
 'use strict';
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs/promises');
-const path = require('node:path');
-const express = require('express');
-const register = require('../index.cjs');
-const { fixture } = require('./playback.test.cjs');
-const { build, generate, loadStages, pageExport } = require('../companion/generate.cjs');
-const contract = require('../public/companion-contract.js');
-const slots = { ticker: { order: 10 }, 'lower-third': { order: 20 } };
-async function setup(t, apiKey) {
-  const f = await fixture(t);
-  const saved = await f.repository.read('stage-1');
-  saved.templates[0].itemID = '1799991234';
-  saved.templates[0].ycsNickname = 'Orlando ticker';
-  saved.templates[1].itemID = 'guest-intro';
-  await f.repository.write('stage-1', saved);
+const { test } = require('node:test'),
+  assert = require('node:assert/strict'),
+  fs = require('node:fs/promises'),
+  path = require('node:path'),
+  http = require('node:http');
+const express = require('express'),
+  { Server } = require('socket.io');
+const client = require(
+  path.join(path.dirname(require.resolve('socket.io')), '../client-dist/socket.io.js')
+);
+const register = require('../index.cjs'),
+  { fixture } = require('./playback.test.cjs'),
+  contract = require('../public/companion-contract.js');
+async function setup(t, { apiKey, duplicate = false } = {}) {
+  const f = await fixture(t),
+    app = express();
+  app.use(express.json());
+  if (duplicate) f.stages.push({ id: 'duplicate', project: 'Stage1', rundown: 'Show' });
   const config = {
-    general: { dataroot: f.root, username: '', port: 5660 },
+    general: { dataroot: f.root, username: '' },
     ycs: {
       enabled: true,
       dataFile: path.join(f.root, 'sources.json'),
       stages: f.stages,
-      slots,
+      slots: { ticker: { order: 10 }, 'lower-third': { order: 20 } },
       ...(apiKey ? { apiKey } : {})
     }
   };
-  const app = express();
-  app.use(express.json());
   const playback = register(app, config, { auth: { CheckLogin: (req, res, next) => next() } });
+  const server = http.createServer(app),
+    io = new Server(server);
+  playback.attachSockets(io);
+  app.use((error, req, res, next) =>
+    res.status(error.status || 500).json({ error: error.message })
+  );
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   await playback.sources.ready;
-  const server = await new Promise((resolve) => {
-    const s = app.listen(0, '127.0.0.1', () => resolve(s));
-  });
   t.after(async () => {
     playback.close();
-    await new Promise((resolve) => server.close(resolve));
+    await new Promise((resolve) => io.close(resolve));
   });
   const base = 'http://127.0.0.1:' + server.address().port;
-  const readStages = () => loadStages(f.repository, slots);
-  return { ...f, config, playback, base, readStages };
-}
-function action(button) {
-  return button.steps[0].action_sets.down[0];
-}
-function urls(profile) {
-  return Object.values(profile.pages).flatMap((page) =>
-    Object.values(page.controls).flatMap((row) =>
-      Object.values(row).flatMap((button) =>
-        button.steps[0].action_sets.down.map((a) => a.options.url.value)
-      )
-    )
-  );
-}
-test('exports use actual IDs and all saved graphic copies; generated buttons execute stage-scoped saved data', async (t) => {
-  const r = await setup(t),
-    stages = await r.readStages(),
-    profile = build(r.base, stages);
-  assert.equal(profile.version, 12);
-  assert.equal(profile.instances['ycs-spx-http'].moduleId, 'generic-http');
-  assert.equal(profile.pages[1].controls[1][0].style.layers[2].text.value, 'Orlando ticker');
-  assert.ok(urls(profile).some((url) => url.includes('/1799991234/play')));
-  assert.ok(urls(profile).some((url) => url.includes('/guest-intro/play')));
-  assert.ok(!urls(profile).some((url) => url.includes('/stage-1/graphics/ticker/')));
-  assert.equal(profile.triggers, undefined);
-  assert.equal(profile.surfaces, undefined);
-  const press = async (button) => {
-    const a = action(button);
-    assert.deepEqual(button.steps[0].action_sets.up, []);
-    const result = await fetch(r.base + a.options.url.value, {
+  const post = (target, body = {}, headers = {}) =>
+    fetch(base + target, {
       method: 'POST',
-      headers: { 'Content-Type': a.options.contenttype.value },
-      body: a.options.body.value
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(body)
     });
-    assert.equal(result.status, 200);
-    return result.json();
-  };
-  for (let index = 0; index < stages.length; index++) {
-    const stage = stages[index],
-      page = profile.pages[index + 1];
-    for (let n = 0; n < stage.graphics.length; n++) {
-      const row = page.controls[n + 1],
-        item = stage.graphics[n];
-      await press(row[1]);
-      await press(row[1]);
-      assert.ok(r.playback.snapshot(stage.id, 'program').graphics.some((g) => g.id === item.id));
-      await press(row[2]);
-      await press(row[3]);
-      await press(row[3]);
-      await press(row[2]);
-      assert.ok(!r.playback.snapshot(stage.id, 'program').graphics.some((g) => g.id === item.id));
-    }
-    await press(page.controls[1][1]);
-    await press(page.controls[2][1]);
-    assert.equal(r.playback.snapshot(stage.id, 'program').graphics.length, 2);
-    await press(page.controls[0][7]);
-    assert.equal(r.playback.snapshot(stage.id, 'program').graphics.length, 0);
-  }
-  const toggles = build(r.base, stages, 'ycs_spx', { toggles: true });
-  const ticker = toggles.pages[1].controls[1];
-  assert.match(action(ticker[1]).options.url.value, /1799991234\/toggle$/);
-  await press(ticker[1]);
-  assert.equal(r.playback.snapshot('stage-1', 'program').graphics.length, 1);
-  await r.playback.command('stage-1', '1799991234', 'stop');
-  await press(ticker[1]);
-  assert.equal(r.playback.snapshot('stage-1', 'program').graphics.length, 1);
-  await press(ticker[4]);
-  assert.equal(r.playback.snapshot('stage-1', 'program').graphics.length, 0);
+  return { ...f, playback, base, post };
+}
+test('project/rundown item commands use saved values and isolate outputs without guessed IDs', async (t) => {
+  const r = await setup(t),
+    show = await r.repository.read('stage-1');
+  show.templates[0].itemID = '1799991234';
+  show.templates[0].steps = 2;
+  await r.repository.write('stage-1', show);
+  const url = (action) => contract.command('Stage1', 'Show', '1799991234', action).path;
+  for (const action of ['play', 'play', 'update', 'continue'])
+    assert.equal((await r.post(url(action))).status, 200);
+  assert.equal(r.playback.snapshot('stage-1', 'program').graphics[0].id, '1799991234');
   assert.equal(r.playback.snapshot('stage-2', 'program').graphics.length, 0);
-});
-test('pagination and fourth outputs retain every ID; exports reject ambiguous IDs and invalid origins', () => {
-  const stages = Array.from({ length: 4 }, (_, n) => ({
-    id: 'stage-' + (n + 1),
-    title: 'Stage ' + (n + 1),
-    graphics: Array.from({ length: 7 }, (_, i) => ({
-      id: 'copy-' + i,
-      title: 'Graphic ' + i,
-      slot: 'ticker'
-    }))
-  }));
-  const profile = build('http://SPX-PC:5660', stages);
-  for (const stage of stages)
-    for (const item of stage.graphics)
-      assert.ok(urls(profile).includes(contract.command(stage.id, item.id, 'play').path));
-  const page = pageExport(profile, 1);
-  assert.equal(page.type, 'page');
-  assert.equal(page.page, profile.pages[1]);
-  assert.throws(() => pageExport(profile, 999));
-  assert.throws(() => build('http://example.com', [{ id: 'stage-1' }]), /rundown/);
-  for (const base of ['https://user:secret@example.com', 'file:///a', 'http://example.com/path'])
-    assert.throws(() => build(base, stages));
-  assert.throws(() =>
-    build('http://example.com', [{ id: 'stage-1', graphics: [{ id: '../bad', slot: 'ticker' }] }])
-  );
-});
-test('authenticated download routes include no field/source secrets, stay off air, and validate slots and page selection', async (t) => {
-  const r = await setup(t, 'PRIVATE-TEST-TOKEN');
-  const before = await fs.readFile(r.repository.stage('stage-1').file, 'utf8');
-  const get = (url, headers = {}) => fetch(r.base + '/api/ycs' + url, { headers });
-  assert.equal((await get('/companion/export')).status, 401);
-  const headers = { Authorization: 'Bearer PRIVATE-TEST-TOKEN' };
-  assert.equal(
-    (await get('/companion/export', { ...headers, Origin: 'https://untrusted.example' })).status,
-    403
-  );
-  const response = await get('/stages/stage-1/companion?style=toggle', headers);
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get('content-disposition'), /attachment/);
-  const text = await response.text(),
-    profile = JSON.parse(text);
-  assert.ok(urls(profile).every((url) => url.startsWith('/api/ycs/stages/stage-1/')));
-  assert.equal(Object.keys(profile.pages).length, 1);
-  assert.equal(profile.instances['ycs-spx-http'].config.prefix, r.base);
-  assert.ok(!text.includes('PRIVATE-TEST-TOKEN'));
-  assert.ok(!text.includes('STAGE 1 ROUND'));
-  const page = await (await get('/companion/export?page=1', headers)).json();
-  assert.equal(page.type, 'page');
-  assert.equal((await get('/companion/export?style=wrong', headers)).status, 422);
-  assert.equal((await get('/companion/export?page=999', headers)).status, 422);
-  assert.equal(await fs.readFile(r.repository.stage('stage-1').file, 'utf8'), before);
+  assert.equal((await r.post(url('stop'))).status, 200);
   assert.equal(r.playback.snapshot('stage-1', 'program').graphics.length, 0);
-  const saved = await r.repository.read('stage-1');
-  delete saved.templates[0].ycsSlot;
-  await r.repository.write('stage-1', saved);
-  const invalid = await get('/stages/stage-1/companion', headers);
-  assert.equal(invalid.status, 422);
-  assert.match((await invalid.json()).error, /output slot/);
+  assert.equal((await r.post(url('update'))).status, 200);
+  assert.equal(r.playback.snapshot('stage-1', 'program').graphics.length, 0);
+  assert.equal((await r.post(url('toggle'))).status, 200);
+  assert.equal(r.playback.snapshot('stage-1', 'program').graphics.length, 1);
+  assert.equal((await r.post(url('toggle'))).status, 200);
+  assert.equal(r.playback.snapshot('stage-1', 'program').graphics.length, 0);
+  assert.equal((await r.post(url('preview'))).status, 200);
+  assert.equal(r.playback.snapshot('stage-1', 'preview').selected, '1799991234');
+  assert.equal((await r.post('/api/Stage1/Show/ticker/play')).status, 404);
+  // Existing editor/control addresses remain compatible.
+  assert.equal((await r.post('/api/ycs/stages/stage-2/graphics/ticker/play')).status, 200);
 });
-test('CLI exports read the configured rundown and use the selected server origin without generating guessed rehearsal targets', async (t) => {
-  const r = await setup(t);
-  const files = await generate(r.root, r.config, { baseUrl: 'http://SPX-PC:5660' });
-  assert.ok(files.length > 2);
-  assert.ok(files.every((file) => !file.includes('Rehearsal')));
-  const profile = JSON.parse(
-    await fs.readFile(path.join(r.root, 'dist/companion/YCS-Orlando.companionconfig'), 'utf8')
+test('item commands enforce auth, origin, exact configured scope and saved-data-only requests; exports are gone', async (t) => {
+  const r = await setup(t, { apiKey: 'test-only' }),
+    url = '/api/Stage1/Show/ticker/play',
+    auth = { Authorization: 'Bearer test-only' };
+  assert.equal((await r.post(url)).status, 401);
+  assert.equal((await r.post(url, {}, { ...auth, Origin: 'https://foreign.invalid' })).status, 403);
+  assert.equal((await r.post(url, { fields: [] }, auth)).status, 400);
+  assert.equal((await r.post('/api/Stage1/Wrong/ticker/play', {}, auth)).status, 404);
+  assert.equal((await r.post('/api/NewProject/Show/ticker/play', {}, auth)).status, 404);
+  assert.equal((await r.post('/api/Stage1/Show/ticker/clear', {}, auth)).status, 400);
+  assert.equal((await r.post(url, {}, auth)).status, 200);
+  for (const target of ['/api/ycs/companion/export', '/api/ycs/stages/stage-1/companion'])
+    assert.equal((await fetch(r.base + target, { headers: auth })).status, 404);
+  const ambiguous = await setup(t, { duplicate: true });
+  assert.equal((await ambiguous.post(url)).status, 409);
+  assert.equal(
+    contract.command('Stage1', 'Show', 'ticker', 'focus').path,
+    '/api/Stage1/Show/ticker/select'
   );
-  assert.ok(urls(profile).includes('/api/ycs/stages/stage-1/graphics/1799991234/play'));
-  assert.equal(profile.instances['ycs-spx-http'].config.prefix, 'http://spx-pc:5660');
+  for (const id of ['../bad', 'bad/name', '', null])
+    assert.throws(() => contract.command(id, 'Show', 'ticker', 'play'));
+});
+test('select/focus deliver only to matching open controllers, without writes or output changes', async (t) => {
+  const r = await setup(t),
+    sockets = [];
+  t.after(() => sockets.forEach((s) => s.disconnect()));
+  const connect = async (stage, controller) => {
+    const socket = client(r.base + '/ycs-playback', {
+      transports: ['websocket'],
+      forceNew: true,
+      reconnection: false
+    });
+    sockets.push(socket);
+    await new Promise((resolve, reject) => {
+      socket.once('connect', resolve);
+      socket.once('connect_error', reject);
+    });
+    await new Promise((resolve) => {
+      socket.once('state', resolve);
+      socket.emit('subscribe', { stage, modes: ['preview'], controller });
+    });
+    return socket;
+  };
+  const [operator, other, output] = await Promise.all([
+    connect('stage-1', true),
+    connect('stage-2', true),
+    connect('stage-1', false)
+  ]);
+  let foreign = 0,
+    renderer = 0;
+  other.on('focus', () => foreign++);
+  output.on('focus', () => renderer++);
+  await r.playback.command('stage-1', 'ticker', 'preview', [
+    { field: 'f5', value: 'UNSAVED SERVER PREVIEW' }
+  ]);
+  const before = await fs.readFile(r.repository.stage('stage-1').file, 'utf8');
+  const program = r.playback.snapshot('stage-1', 'program'),
+    preview = r.playback.snapshot('stage-1', 'preview');
+  for (const action of ['select', 'focus']) {
+    const event = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(Error('Focus event timeout')), 2000);
+      operator.once('focus', (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      });
+    });
+    assert.equal((await r.post('/api/Stage1/Show/lower-third/' + action)).status, 200);
+    assert.deepEqual(await event, { stage: 'stage-1', selected: 'lower-third' });
+  }
+  assert.equal(await fs.readFile(r.repository.stage('stage-1').file, 'utf8'), before);
+  assert.deepEqual(r.playback.snapshot('stage-1', 'program'), program);
+  assert.deepEqual(r.playback.snapshot('stage-1', 'preview'), preview);
+  assert.equal(foreign, 0);
+  assert.equal(renderer, 0);
+  assert.equal((await r.post('/api/Stage1/Show/missing/select')).status, 404);
+  const unslotted = await r.repository.read('stage-1');
+  delete unslotted.templates[1].ycsSlot;
+  await r.repository.write('stage-1', unslotted);
+  assert.equal((await r.post('/api/Stage1/Show/lower-third/select')).status, 200);
+  assert.equal((await r.post('/api/Stage1/Show/lower-third/play')).status, 422);
 });

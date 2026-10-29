@@ -1,67 +1,39 @@
-# Companion controls
+# Companion setup
 
-Use Companion **5.1** with **Generic HTTP Requests 3.2.0**. No custom module or physical Stream Deck is needed; Interactive Buttons provides an emulator. The exports use Companion JSON version 12.
+Use the standard **Generic: HTTP Requests** connection in Companion. No custom SPX module, generated buttons or import files are needed. Each separate Companion installation needs this module/connection available and configured. A computer only displaying an SPX browser output needs neither Companion nor this module. Stream Decks connected to a central Companion installation, including through Satellite, use that installation's connections.
 
-## Copy commands from a rundown item
+## Create a button
 
-Open an item in a configured stage rundown, then expand **Companion controls**. It shows the permanent **Item ID**, **Copy ID**, and **Copy Play / Stop / Toggle / Update URL** buttons. Use the copied URL in a Generic HTTP **POST** Press action, Content type **application/json**, Body **{}**. Leave Release empty. Copying sends no playback command and preserves unsaved field edits.
+1. In Companion's Connections, add **Generic: HTTP Requests**. Install its module through Companion if it is not already available.
+2. Open the item in the SPX rundown. In its **Companion** row, choose an action and click the copy icon.
+3. Add a **POST** action to the Companion button's **Press** actions. Paste the copied URL, set Content Type to **application/json** and Body to **{}**. Leave Release empty.
 
-The copied URL includes the exact current stage and item ID. Nickname changes and reordering do not change the target. Deleting and re-adding an item creates a different ID: copy again or export fresh button pages. The native Caps Lock overlay's copy shortcuts also use the stage API on configured rundowns.
+The copied URL is complete, so Generic HTTP ignores its optional Base URL. Open SPX using the central computer's LAN hostname/IP before copying for another PC. A localhost address always refers to the machine running Companion. See the module's [official guide](https://github.com/bitfocus/companion-module-generic-http/blob/master/companion/HELP.md).
 
-The full URL uses the server origin used to open the rundown. Open SPX through its LAN hostname/IP when preparing URLs for another computer; a localhost URL refers to that other computer itself. Generated profiles instead use relative action paths and one editable connection Base URL. The Generic HTTP module also supports a full URL that overrides its Base URL; see its [official guide](https://github.com/bitfocus/companion-module-generic-http/blob/master/companion/HELP.md).
+On the server, remote Companion requests require the existing `ycs.apiKey` setting and an `Authorization: Bearer YOUR_KEY` action header unless authenticated as an operator. The server must listen on the reachable LAN address. This UI change does not change binding, firewall or authorization settings. Do not put private tokens in URLs.
 
-If the browser blocks clipboard access, the panel exposes selectable text. This includes ordinary LAN HTTP pages. An item without a configured output slot shows a warning and its play-command copy buttons are disabled. It still exposes Copy ID. Importing a graphic alone does not assign its output slot yet.
+## Item API
 
-## Download real button pages
+Use POST with an empty JSON object:
 
-In the stage panel, expand **Companion button pages**, then choose:
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/play
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/stop
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/toggle
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/update
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/select
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/preview
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/continue
 
-- **Download Play / Stop buttons**: explicit Play, Update and Stop for each actual saved item.
-- **Download Toggle + Play / Stop buttons**: Toggle and Update, with explicit Play and Stop fallbacks.
+- **Focus** uses `/select`; `/focus` is an alias. It focuses the matching row in currently open controllers for that configured rundown. It does not open a browser, navigate another rundown, play a graphic, change preview, save fields or overwrite unsaved edits. Reconnecting does not replay old focus commands.
+- **Play** uses saved fields and current mappings. Repeated Play updates the active item without replaying its entrance.
+- **Stop** removes that item from program.
+- **Toggle** checks actual program inside the output queue and chooses Play or Stop. Use one Press action, with no Release action: duplicate requests toggle twice.
+- **Update** applies saved changes to an active item; it does not start a stopped item.
+- **Preview** previews saved data. It is separate from Focus and from a local editor's unsaved draft.
+- **Continue** advances a running template with continuation steps; unsupported or inactive items return an error.
 
-Exports are read-only snapshots of the saved rundown. Button labels use saved nicknames, descriptions or template names. Every target is read from its actual saved ItemID; there are no assumed ticker/lower-third IDs or controls for missing demo items. Multiple copies of the same template are independent buttons. Each stage page has Stop Stage in its header and up to three graphic rows; additional items receive additional pages. CLI/all-stage exports also include overview pages.
+Project and rundown must match exactly one configured output in `ycs.stages`. Unknown/unconfigured pairs return 404; ambiguous pairs return 409. This address format does not automatically provision outputs for new projects. Native editor, data and renderer internals retain existing stage routes for compatibility. The public item API does not accept field edits.
 
-Validation rejects missing/unknown output slots, duplicate/unsupported IDs, unsupported template paths and empty rundowns. Errors appear in SPX without navigating away or losing field drafts. Exporting never changes mappings, rundown content or program state.
+Nickname changes and reordering do not change the item ID. Deleting and re-adding an item creates a different ID, so copy its new URL. The compact copy control never executes an action. Hover the icon to inspect its target; selectable text appears if clipboard access is blocked. An item without an output slot permits Focus copying but disables playback-action copying.
 
-In Companion, open **Import / Export**, select the downloaded file, then use the **Buttons** tab to select and import pages into empty destinations. Map to an existing Generic HTTP connection or create the imported connection. A full import/reset can replace other configuration; use it only for a disposable test installation. The file contains labels, connection origin and commands, with no field values, source data, API keys, triggers or surface settings.
-
-The imported connection Base URL is the SPX origin used for download. Change it to the central server's LAN address for switch-PC imports. Prepare only the appropriate stage's pages for each operator; keep overview pages on the central operator computer. HTTP authorization is enforced by the existing API rules. If a private ycs.apiKey is configured, add an Authorization Bearer header to the actions locally; exports deliberately omit it. Do not share subsequent Companion exports containing private headers.
-
-## CLI generation
-
-From the SPX checkout:
-
-    node ycs/companion/generate.cjs .local/ycs-dev.json
-    node ycs/companion/generate.cjs .local/ycs-dev.json --base-url http://SPX-PC:5660 --name YCS-Orlando
-
-The CLI reads the configured project/rundown files and validates all items before writing. It creates **dist/companion/YCS-Orlando.companionconfig**, its **-Toggle** variant, and individual page files. The default origin is localhost with the configured server port. Changing --base-url only changes exported connection settings; it does not change SPX network binding. Files remain ignored; code is tracked in Git.
-
-CLI generation no longer invents rehearsal targets from the event configuration. To export the running isolated rehearsal's real IDs, download from:
-
-    http://127.0.0.1:5661/api/ycs/companion/export
-    http://127.0.0.1:5661/api/ycs/companion/export?style=toggle
-
-## HTTP contract
-
-POST with JSON body {} to:
-
-    /api/ycs/stages/STAGE_ID/graphics/ITEM_ID/play
-    /api/ycs/stages/STAGE_ID/graphics/ITEM_ID/stop
-    /api/ycs/stages/STAGE_ID/graphics/ITEM_ID/toggle
-    /api/ycs/stages/STAGE_ID/graphics/ITEM_ID/update
-    /api/ycs/stages/STAGE_ID/clear
-
-Play uses saved data/current mappings. Update applies saved changes to an active item; it cannot start a stopped graphic. Toggle resolves against actual program inside the stage queue, so an intervening rundown command is reflected by the next press. Each successful request flips once; duplicate requests flip twice. Use one Press action and no Release action. Manual/linked changes and rounds-remaining controls stay in the rundown.
-
-A successful response is the server's composition, not proof that vMix has put it on broadcast. Non-2xx responses must be treated as failed commands. Colours identify action types, not continuous program/vMix tally. Nicknames are display labels; ItemIDs are the command targets.
-
-Read-only export routes (existing operator/API authorization and origin checks apply):
-
-    GET /api/ycs/companion/export?style=explicit|toggle
-    GET /api/ycs/stages/STAGE_ID/companion?style=explicit|toggle
-
-Add page=NUMBER to request a single-page export. Stage exports include only that stage; all-stage exports include overview pages. Neither export route executes commands or embeds credentials.
-
-## Rehearsal
-
-Start the separate rehearsal and import its exported buttons into a disposable Companion configuration. Use **Interactive Buttons** to test Play twice, Update on a stopped item, Toggle after a command from another controller, simultaneous graphics, individual Stop, and stage-only Stop. Verify other stages remain unchanged. Test missing targets and source outages. Actual venue LAN/vMix and physical surfaces still need validation; this does not add continuous tally.
+Successful HTTP responses describe server state, not vMix broadcast tally. Check failed/non-2xx commands in Companion's connection status/log. Test on the separate rehearsal first. Venue LAN/vMix and physical surfaces still need validation.

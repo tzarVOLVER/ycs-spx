@@ -6,7 +6,7 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 async function controller(t, compact = false) {
   const dom = new JSDOM(
-    `<html data-ycs-stage="stage-1"><head></head><body><div id="controllerPluginButtons"></div><iframe id="previewIF"></iframe>
+    `<html data-ycs-stage="stage-1" data-ycs-project="Stage1" data-ycs-rundown="Show"><head></head><body><div id="controllerPluginButtons"></div><iframe id="previewIF"></iframe>
     <div class="itemrow inFocus" data-spx-epoch="ticker"><div class="truncate"></div><div id="Expanded" style="display:block"></div>
     <input data-update="f0" type="hidden" value="broadcast-1"><input data-update="f5" class="gcinput" value="MANUAL ROUND">
     <input name="RundownItem[onair]" value="false"><span data-spx-name="icon"></span><span data-spx-name="deletelarge"></span>
@@ -127,6 +127,7 @@ async function controller(t, compact = false) {
     posts,
     program,
     originalRound,
+    focus: (selection) => channels.get('focus')(selection),
     closed: () => closed,
     rejectFields: (errors) => {
       validationError = errors;
@@ -185,33 +186,51 @@ test('native Save closes the editor; Stop does not silently refresh a stale edit
   assert.equal(r.posts.at(-1).body.revision, 1);
 });
 
-test('Companion copy controls expose the real item ID and exact saved-data POST URLs without changing fields or sending commands', async (t) => {
+test('compact action picker copies exact project/rundown/item URLs without requests or draft changes', async (t) => {
   const r = await controller(t, true),
     copied = [];
   Object.defineProperty(r.window.navigator, 'clipboard', {
     value: { writeText: async (value) => copied.push(value) }
   });
-  const details = r.row.querySelector('.ycs-companion-tools');
-  assert.ok(details);
-  assert.match(details.textContent, /Item ID: ticker/);
-  assert.match(details.textContent, /POST.*application\/json.*Body \{\}/);
+  const tools = r.row.querySelector('.ycs-companion-tools'),
+    select = tools.querySelector('select'),
+    button = tools.querySelector('button');
+  assert.equal(tools.querySelectorAll('button').length, 1);
+  assert.equal(tools.querySelector('p'), null);
+  assert.equal(tools.querySelector('summary'), null);
+  assert.equal(r.window.document.querySelector('.ycs-companion-download'), null);
+  assert.equal(
+    button.innerHTML,
+    r.window.document.querySelector('[data-copy-output="preview"]').innerHTML
+  );
   const input = r.row.querySelector('[data-update="f5"]');
   input.value = 'UNSAVED DRAFT';
-  details.querySelector('.ycs-companion-identity button').click();
-  for (const button of details.querySelectorAll('.ycs-companion-actions button')) button.click();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(copied, [
-    'ticker',
-    ...['play', 'stop', 'toggle', 'update'].map(
-      (action) => 'http://localhost/api/ycs/stages/stage-1/graphics/ticker/' + action
-    )
-  ]);
+  for (const action of ['select', 'play', 'stop', 'toggle', 'update', 'preview', 'continue']) {
+    select.value = action;
+    select.dispatchEvent(new r.window.Event('change', { bubbles: true }));
+    button.click();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(copied.at(-1), 'http://localhost/api/Stage1/Show/ticker/' + action);
+  }
   assert.equal(r.posts.length, 0);
   assert.equal(input.value, 'UNSAVED DRAFT');
   assert.equal(r.row.querySelector('#Expanded').style.display, 'block');
-  await r.window.copyItemID('ticker','play');
-  assert.equal(copied.at(-1),'http://localhost/api/ycs/stages/stage-1/graphics/ticker/play');
-  assert.equal(r.posts.length,0);
+  await r.window.copyItemID('ticker', 'play');
+  assert.equal(copied.at(-1), 'http://localhost/api/Stage1/Show/ticker/play');
+});
+
+test('remote focus selects only a matching row and preserves open drafts without preview or playout', async (t) => {
+  const r = await controller(t, true),
+    input = r.row.querySelector('[data-update="f5"]');
+  input.value = 'UNSAVED';
+  r.row.classList.remove('inFocus');
+  r.focus({ stage: 'stage-2', selected: 'ticker' });
+  assert.equal(r.row.classList.contains('inFocus'), false);
+  r.focus({ stage: 'stage-1', selected: 'ticker' });
+  assert.equal(r.row.classList.contains('inFocus'), true);
+  assert.equal(input.value, 'UNSAVED');
+  assert.equal(r.posts.length, 0);
+  assert.equal(r.closed(), 0);
 });
 
 test('nickname editing changes only display metadata, preserves unsaved field edits and supports Cancel and clearing', async (t) => {

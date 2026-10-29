@@ -3,15 +3,19 @@
   else root.YCSCompanion = factory();
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   const identifier = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}$/;
-  const actions = ['play', 'stop', 'toggle', 'update'];
-  function command(stage, item, action) {
-    if (!identifier.test(stage) || typeof stage !== 'string') throw new Error('Invalid stage ID');
-    const clear = item === null && action === 'clear';
-    if (!clear && (typeof item !== 'string' || !identifier.test(item) || !(actions.includes(action) || action === 'continue')))
-      throw new Error('Invalid Companion item or action');
+  const actions = ['select', 'play', 'stop', 'toggle', 'update', 'preview', 'continue'];
+  function command(project, rundown, item, action) {
+    if (
+      ![project, rundown, item].every(
+        (value) => typeof value === 'string' && identifier.test(value)
+      )
+    )
+      throw new Error('Invalid project, rundown or item ID');
+    if (action === 'focus') action = 'select';
+    if (!actions.includes(action)) throw new Error('Unknown item action');
     return {
       method: 'POST',
-      path: '/api/ycs/stages/' + stage + (clear ? '/clear' : '/graphics/' + item + '/' + action),
+      path: '/api/' + [project, rundown, item, action].map(encodeURIComponent).join('/'),
       body: '{}',
       contentType: 'application/json'
     };

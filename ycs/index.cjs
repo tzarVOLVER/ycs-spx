@@ -5,7 +5,6 @@ const { Playback, RundownRepository, prepareEdits } = require('./playback.cjs');
 const { DataSources, linkable } = require('./data.cjs');
 const { LocalFiles } = require('./local-files.cjs');
 const { Renderers } = require('./renderers.cjs');
-const companion = require('./companion/generate.cjs');
 
 module.exports = function registerYCS(app, config, hooks = {}) {
   if (!config.ycs?.enabled) return;
@@ -243,30 +242,6 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     '/stages/:stage/graphics',
     handlers(async (req, res) => res.json(await playback.catalog(req.params.stage)))
   );
-  const exportCompanion = handlers(async (req, res) => {
-    try {
-      const style = req.query.style || 'explicit';
-      if (!['explicit', 'toggle'].includes(style))
-        throw new Error('Choose explicit or toggle buttons');
-      const stages = await companion.loadStages(repository, settings.slots, req.params.stage);
-      const profile = companion.build(`${req.protocol}://${req.get('host')}`, stages, 'ycs_spx', {
-        toggles: style === 'toggle',
-        overview: !req.params.stage
-      });
-      const result =
-        req.query.page === undefined
-          ? profile
-          : companion.pageExport(profile, Number(req.query.page));
-      res
-        .attachment(`YCS-${req.params.stage || 'all-stages'}-${style}.companionconfig`)
-        .json(result);
-    } catch (error) {
-      error.status ||= 422;
-      throw error;
-    }
-  });
-  router.get('/companion/export', exportCompanion);
-  router.get('/stages/:stage/companion', exportCompanion);
   router.get(
     '/stages/:stage/graphics/:graphic/editor',
     handlers(async (req, res) =>
@@ -352,6 +327,43 @@ module.exports = function registerYCS(app, config, hooks = {}) {
   );
   app.use('/api/ycs', router);
 
+  // Public control addresses identify the saved project/rundown/item. The
+  // configured output is resolved exactly; there is no global focused rundown.
+  app.post(
+    '/api/:project/:rundown/:graphic/:action',
+    // Leave existing API namespaces to their own routers, including removed
+    // endpoints that must remain 404 rather than becoming item commands.
+    (req, res, next) => ['ycs', 'v1'].includes(req.params.project) ? next('route') : next(),
+    sameOrigin,
+    apiAccess,
+    handlers(async (req, res) => {
+      const { project, rundown, graphic, action } = req.params;
+      const allowed = require('./public/companion-contract.js').actions;
+      if (!allowed.includes(action) && action !== 'focus')
+        return res.status(400).json({ error: 'Unknown item action' });
+      const matches = [...repository.stages.values()].filter(
+        (stage) => stage.project === project && stage.rundown === rundown
+      );
+      if (!matches.length)
+        return res.status(404).json({ error: 'Project/rundown has no configured output' });
+      if (matches.length !== 1)
+        return res.status(409).json({ error: 'Project/rundown has multiple configured outputs' });
+      if (
+        req.body &&
+        (typeof req.body !== 'object' || Array.isArray(req.body) || Object.keys(req.body).length)
+      )
+        return res
+          .status(400)
+          .json({ error: 'Item commands use saved data; send an empty JSON object' });
+      const stage = matches[0].id;
+      res.json(
+        action === 'select' || action === 'focus'
+          ? await playback.select(stage, graphic)
+          : await playback.command(stage, graphic, action)
+      );
+    })
+  );
+
   // Preserve the familiar SPX editor and keyboard/Save/Play/Update controls.
   // Requests for configured stages bypass legacy shared global.rundownData.
   app.use((req, res, next) => {
@@ -364,6 +376,8 @@ module.exports = function registerYCS(app, config, hooks = {}) {
         res.locals.ycsStage = {
           id: stage.id,
           title: stage.title,
+          project: stage.project,
+          rundown: stage.rundown,
           previewUrl: `/output/${stage.id}/preview`
         };
     }

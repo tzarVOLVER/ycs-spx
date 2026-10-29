@@ -1,21 +1,30 @@
-// Builds copy controls only. No button in this disclosure sends playout.
-window.YCSCompanionTools = function ({ row, stage, editor, copyText }) {
+// Copy-only controls. Selecting an action never sends a request.
+window.YCSCompanionTools = function ({ row, project, rundown, editor, copyIcon, copyText }) {
   const target = row.querySelector('.ycs-compact-editor') || row.querySelector('#Expanded');
   if (!target || row.querySelector('.ycs-companion-tools')) return;
   const item = row.dataset.spxEpoch;
-  const details = document.createElement('details');
-  details.className = 'ycs-companion-tools';
-  const summary = document.createElement('summary');
-  summary.textContent = 'Companion controls';
-  const identity = document.createElement('div');
-  identity.className = 'ycs-companion-identity';
-  const id = document.createElement('code');
-  id.textContent = 'Item ID: ' + item;
-  const copyID = document.createElement('button');
-  copyID.type = 'button';
-  copyID.textContent = 'Copy ID';
-  const buttons = document.createElement('div');
-  buttons.className = 'ycs-companion-actions';
+  const container = document.createElement('div');
+  container.className = 'ycs-companion-tools';
+  const line = document.createElement('div');
+  line.className = 'ycs-companion-row';
+  const label = document.createElement('label');
+  label.textContent = 'Companion';
+  const select = document.createElement('select');
+  select.id = 'ycs-companion-action-' + item;
+  select.setAttribute('aria-label', 'Companion action');
+  label.htmlFor = select.id;
+  for (const action of window.YCSCompanion.actions) {
+    const option = document.createElement('option');
+    option.value = action;
+    option.textContent = action === 'select' ? 'Focus' : action[0].toUpperCase() + action.slice(1);
+    select.append(option);
+  }
+  select.value = 'play';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'ycs-copy-output';
+  button.setAttribute('aria-label', 'Copy Companion URL');
+  button.innerHTML = copyIcon;
   const status = document.createElement('div');
   status.className = 'ycs-copy-status';
   status.setAttribute('role', 'status');
@@ -23,38 +32,31 @@ window.YCSCompanionTools = function ({ row, stage, editor, copyText }) {
   fallback.className = 'ycs-copy-fallback';
   fallback.readOnly = true;
   fallback.hidden = true;
-  fallback.setAttribute('aria-label', 'Companion command to copy');
-  copyID.addEventListener('click', () => copyText(item, 'Item ID', { status, fallback }));
-  identity.append(id, copyID);
-  const help = document.createElement('p');
-  help.textContent =
-    'Generic HTTP · POST · Content type application/json · Body {} · Press action only';
-  const note = document.createElement('p');
-  note.textContent =
-    'Commands use saved fields. Copying does not play or update graphics. Recreate buttons if you delete and re-add this item.';
-  for (const action of window.YCSCompanion.actions) {
-    const title = action[0].toUpperCase() + action.slice(1);
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = 'Copy ' + title + ' URL';
-    button.disabled = editor.slotConfigured === false;
-    const url = new URL(window.YCSCompanion.command(stage, item, action).path, location.href).href;
-    button.title = 'POST ' + url;
-    button.addEventListener('click', () => copyText(url, title + ' URL', { status, fallback }));
-    buttons.append(button);
+  fallback.setAttribute('aria-label', 'Companion URL to copy');
+  let url;
+  function update() {
+    try {
+      url = new URL(
+        window.YCSCompanion.command(project, rundown, item, select.value).path,
+        location.href
+      ).href;
+      button.disabled = editor.slotConfigured === false && select.value !== 'select';
+      button.title = button.disabled
+        ? 'Assign an output slot to this item first'
+        : 'Copy POST ' + url;
+    } catch (error) {
+      button.disabled = true;
+      button.title = error.message;
+    }
+    status.textContent = '';
+    fallback.hidden = true;
   }
-  details.append(summary, identity, buttons, help, note, status, fallback);
+  select.addEventListener('change', update);
+  button.addEventListener('click', () => copyText(url, 'Companion URL', { status, fallback }));
   for (const type of ['click', 'keydown', 'keyup'])
-    details.addEventListener(type, (event) => event.stopPropagation());
-  if (editor.slotConfigured === false) {
-    const warning = document.createElement('p');
-    warning.className = 'ycs-error';
-    warning.textContent =
-      'This item has no configured output slot. Companion commands cannot play it until a slot is assigned.';
-    details.append(warning);
-  }
-  // Prevent SPX's global shortcuts from firing while selecting fallback text.
-  fallback.addEventListener('keydown', (event) => event.stopPropagation());
-  fallback.addEventListener('keyup', (event) => event.stopPropagation());
-  target.append(details);
+    container.addEventListener(type, (event) => event.stopPropagation());
+  line.append(label, select, button);
+  container.append(line, status, fallback);
+  target.append(container);
+  update();
 };

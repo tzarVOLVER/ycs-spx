@@ -187,6 +187,14 @@ class Playback extends EventEmitter {
       return { nickname: name, editorRevision: item.ycsEditRevision || 0 };
     });
   }
+  select(stageId, graphicId) {
+    return this.queue(stageId, async () => {
+      this.repository.item(await this.repository.read(stageId), graphicId);
+      const selection = { stage: stageId, selected: graphicId };
+      this.emit(stageId + ':focus', selection);
+      return selection;
+    });
+  }
   command(stageId, graphicId, action, fields, options = {}) {
     if (!['play', 'stop', 'toggle', 'update', 'preview', 'save', 'continue'].includes(action)) fail('Unknown command');
     return this.queue(stageId, async () => {
