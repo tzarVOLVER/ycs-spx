@@ -129,3 +129,19 @@ test('LAN HTTP copying falls back to selected text, reports browser denial and i
   assert.equal(r.element.querySelector('.ycs-copy-status').textContent, status);
   assert.equal(fallback.value, 'http://192.0.2.7:5660/output/stage-2/preview');
 });
+
+test('a failed Companion export leaves the rundown in place and reports the validation problem', async (t) => {
+  const r = await panel(t),
+    before = r.window.location.href;
+  let url;
+  r.window.fetch = async (target) => {
+    url = target;
+    return { ok: false, json: async () => ({ error: 'Graphic has no configured output slot' }) };
+  };
+  const link = r.element.querySelector('[data-companion-style="toggle"]');
+  await r.controller.downloadCompanion(link);
+  assert.equal(url, 'http://192.0.2.7:5660/api/ycs/stages/stage-2/companion?style=toggle');
+  assert.equal(r.window.location.href, before);
+  assert.equal(r.stops(), 0);
+  assert.match(r.element.querySelector('.ycs-command-status').textContent, /output slot/);
+});

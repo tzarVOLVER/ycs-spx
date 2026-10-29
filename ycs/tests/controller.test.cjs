@@ -108,6 +108,8 @@ async function controller(t, compact = false) {
     return { ok: true, json: async () => payload };
   };
   await require('./helpers/browser.cjs').loadContract(window);
+  window.eval(await fs.readFile(path.join(__dirname, '../public/companion-contract.js'), 'utf8'));
+  window.eval(await fs.readFile(path.join(__dirname, '../public/companion-tools.js'), 'utf8'));
   window.eval(await fs.readFile(path.join(__dirname, '../public/stage-panel.js'), 'utf8'));
   window.eval(
     "'use strict';\n" + (await fs.readFile(path.join(__dirname, '../public/controller.js'), 'utf8'))
@@ -183,6 +185,35 @@ test('native Save closes the editor; Stop does not silently refresh a stale edit
   assert.equal(r.posts.at(-1).body.revision, 1);
 });
 
+test('Companion copy controls expose the real item ID and exact saved-data POST URLs without changing fields or sending commands', async (t) => {
+  const r = await controller(t, true),
+    copied = [];
+  Object.defineProperty(r.window.navigator, 'clipboard', {
+    value: { writeText: async (value) => copied.push(value) }
+  });
+  const details = r.row.querySelector('.ycs-companion-tools');
+  assert.ok(details);
+  assert.match(details.textContent, /Item ID: ticker/);
+  assert.match(details.textContent, /POST.*application\/json.*Body \{\}/);
+  const input = r.row.querySelector('[data-update="f5"]');
+  input.value = 'UNSAVED DRAFT';
+  details.querySelector('.ycs-companion-identity button').click();
+  for (const button of details.querySelectorAll('.ycs-companion-actions button')) button.click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(copied, [
+    'ticker',
+    ...['play', 'stop', 'toggle', 'update'].map(
+      (action) => 'http://localhost/api/ycs/stages/stage-1/graphics/ticker/' + action
+    )
+  ]);
+  assert.equal(r.posts.length, 0);
+  assert.equal(input.value, 'UNSAVED DRAFT');
+  assert.equal(r.row.querySelector('#Expanded').style.display, 'block');
+  await r.window.copyItemID('ticker','play');
+  assert.equal(copied.at(-1),'http://localhost/api/ycs/stages/stage-1/graphics/ticker/play');
+  assert.equal(r.posts.length,0);
+});
+
 test('nickname editing changes only display metadata, preserves unsaved field edits and supports Cancel and clearing', async (t) => {
   const r = await controller(t, true),
     edit = r.row.querySelector('.ycs-nickname-edit'),
@@ -193,16 +224,18 @@ test('nickname editing changes only display metadata, preserves unsaved field ed
   r.row.querySelector('[aria-label="Cancel nickname"]').click();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(r.posts.length, 0);
-  const escaped=[];
-  r.window.document.addEventListener('keydown',event=>escaped.push(event.key));
+  const escaped = [];
+  r.window.document.addEventListener('keydown', (event) => escaped.push(event.key));
   edit.click();
-  r.row.querySelector('[aria-label="Rundown nickname"]').dispatchEvent(new r.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
-  assert.equal(r.row.querySelector('.ycs-nickname-form').hidden,true);
-  assert.deepEqual(escaped,[]);
+  r.row
+    .querySelector('[aria-label="Rundown nickname"]')
+    .dispatchEvent(new r.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(r.row.querySelector('.ycs-nickname-form').hidden, true);
+  assert.deepEqual(escaped, []);
   input.value = 'UNSAVED ROUND';
   r.row.dataset.spxChanged = 'true';
   edit.click();
-  r.row.querySelector('[aria-label="Rundown nickname"]').value='  Player <b>A</b>  ';
+  r.row.querySelector('[aria-label="Rundown nickname"]').value = '  Player <b>A</b>  ';
   r.row.querySelector('[aria-label="Save nickname"]').click();
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
   assert.equal(r.posts.at(-1).url, '/api/ycs/stages/stage-1/graphics/ticker/nickname');
@@ -215,7 +248,7 @@ test('nickname editing changes only display metadata, preserves unsaved field ed
   await r.window.saveTemplateItemChangesByElement(r.row);
   assert.equal(r.posts.at(-1).body.revision, 1);
   edit.click();
-  r.row.querySelector('[aria-label="Rundown nickname"]').value='';
+  r.row.querySelector('[aria-label="Rundown nickname"]').value = '';
   r.row.querySelector('[aria-label="Save nickname"]').click();
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
   assert.equal(r.row.querySelector('[data-ycs-item-title]').textContent, 'YCS TICKER 1');

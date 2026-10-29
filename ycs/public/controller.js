@@ -140,6 +140,7 @@ if (stage) {
     const id = row.dataset.spxEpoch, model = { links: {}, widgets: {}, revision: 0, queue: Promise.resolve() }; models.set(id, model);
     model.ready = request(`/api/ycs/stages/${stage}/graphics/${encodeURIComponent(id)}/editor`).then(editor => {
       model.links = editor.links; model.revision = editor.revision; model.template = editor.template; model.nickname=editor.nickname || ''; organize(row, editor, model);
+      window.YCSCompanionTools({ row, stage, editor, copyText: (...args) => stagePanel.copyText(...args) });
       for (const [field, link] of Object.entries(model.links)) {
         const input = row.querySelector(`[data-update="${field}"]`); if (!input) continue;
         const title = editor.fields?.find(item => item.field === field)?.title || input.placeholder || 'Current round';
@@ -216,6 +217,15 @@ if (stage) {
     return send(row, forced || (active.has(row.dataset.spxEpoch) ? 'stop' : 'play'));
   };
   window.nextItem = row => send(row || window.getFocusedRow(), 'continue');
+  // Keep the native Caps Lock overlay's copy shortcuts on the same stage API.
+  window.copyItemID = (item, action = '') => {
+    try {
+      const text = action ? new URL(window.YCSCompanion.command(stage, item, action.toLowerCase()).path, location.href).href : item;
+      const copied = stagePanel.copyText(text, action ? 'Companion ' + action + ' URL' : 'Item ID');
+      window.showItemIDs?.(false);
+      return copied;
+    } catch (error) { notify(error.message, true); }
+  };
   async function clearStage() {
     try { await request(`/api/ycs/stages/${stage}/clear`, {}); notify('Stage stopped.'); }
     catch (error) { notify(error.message, true); }

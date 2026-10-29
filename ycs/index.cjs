@@ -5,6 +5,7 @@ const { Playback, RundownRepository, prepareEdits } = require('./playback.cjs');
 const { DataSources, linkable } = require('./data.cjs');
 const { LocalFiles } = require('./local-files.cjs');
 const { Renderers } = require('./renderers.cjs');
+const companion = require('./companion/generate.cjs');
 
 module.exports = function registerYCS(app, config, hooks = {}) {
   if (!config.ycs?.enabled) return;
@@ -242,6 +243,30 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     '/stages/:stage/graphics',
     handlers(async (req, res) => res.json(await playback.catalog(req.params.stage)))
   );
+  const exportCompanion = handlers(async (req, res) => {
+    try {
+      const style = req.query.style || 'explicit';
+      if (!['explicit', 'toggle'].includes(style))
+        throw new Error('Choose explicit or toggle buttons');
+      const stages = await companion.loadStages(repository, settings.slots, req.params.stage);
+      const profile = companion.build(`${req.protocol}://${req.get('host')}`, stages, 'ycs_spx', {
+        toggles: style === 'toggle',
+        overview: !req.params.stage
+      });
+      const result =
+        req.query.page === undefined
+          ? profile
+          : companion.pageExport(profile, Number(req.query.page));
+      res
+        .attachment(`YCS-${req.params.stage || 'all-stages'}-${style}.companionconfig`)
+        .json(result);
+    } catch (error) {
+      error.status ||= 422;
+      throw error;
+    }
+  });
+  router.get('/companion/export', exportCompanion);
+  router.get('/stages/:stage/companion', exportCompanion);
   router.get(
     '/stages/:stage/graphics/:graphic/editor',
     handlers(async (req, res) =>

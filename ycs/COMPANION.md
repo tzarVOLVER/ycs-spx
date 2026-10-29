@@ -1,65 +1,67 @@
-# Companion: explicit stage and graphic commands
+# Companion controls
 
-Use Companion's **Generic HTTP Requests** connection. A custom module is not required. Its browser emulator can exercise these actions without a physical Stream Deck. The generated profiles target **Companion 5.1** (JSON export version 12) with **Generic HTTP 3.2.0**; older Companion import formats are not claimed compatible.
+Use Companion **5.1** with **Generic HTTP Requests 3.2.0**. No custom module or physical Stream Deck is needed; Interactive Buttons provides an emulator. The exports use Companion JSON version 12.
 
-## Generate and import
+## Copy commands from a rundown item
 
-From the SPX fork, run `npm run ycs:companion` or `node ycs/companion/generate.cjs .local/ycs-dev.json`. The generator reads only configured stage IDs/titles. It writes:
+Open an item in a configured stage rundown, then expand **Companion controls**. It shows the permanent **Item ID**, **Copy ID**, and **Copy Play / Stop / Toggle / Update URL** buttons. Use the copied URL in a Generic HTTP **POST** Press action, Content type **application/json**, Body **{}**. Leave Release empty. Copying sends no playback command and preserves unsaved field edits.
 
-- `dist/companion/YCS-Rehearsal.companionconfig`: stage pages and overview, targeting the separate test server at `http://127.0.0.1:5661`.
-- `dist/companion/YCS-Orlando.companionconfig`: the same controls targeting the normal server at `http://127.0.0.1:5660`.
-- Matching `*-stage-1/2/3.companionconfig` individual page exports for switch-PC imports. The stage list comes from configuration; it is not limited to three by the generator.
+The copied URL includes the exact current stage and item ID. Nickname changes and reordering do not change the target. Deleting and re-adding an item creates a different ID: copy again or export fresh button pages. The native Caps Lock overlay's copy shortcuts also use the stage API on configured rundowns.
 
-In Companion, open **Import / Export**, choose a file, then use the **Buttons** tab to select pages and map the imported `ycs_rehearsal` or `ycs_orlando` HTTP connection. Import into empty destination pages so existing controls are retained. A full import can replace existing pages/connections; use that only for a new disposable Companion configuration. The profiles contain no triggers, surface settings, source URLs, saved field values or credentials. Generated files remain ignored; the generator is tracked in Git.
+The full URL uses the server origin used to open the rundown. Open SPX through its LAN hostname/IP when preparing URLs for another computer; a localhost URL refers to that other computer itself. Generated profiles instead use relative action paths and one editable connection Base URL. The Generic HTTP module also supports a full URL that overrides its Base URL; see its [official guide](https://github.com/bitfocus/companion-module-generic-http/blob/master/companion/HELP.md).
 
-The leftmost button labels the stage and has no action. The seven following buttons are Ticker Play / Update / Stop, Lower Third Play / Update / Stop, and Stop Stage. Every action uses an explicit stage ID and stable graphic item ID with an empty JSON body. There are no toggles or controller-focus dependencies. Update applies the saved draft/current mapped values; it does not take a stopped graphic on air. Pending text that has not been saved in the rundown is not available to Companion. Use the rundown for field changes, manual/linked modes and the rounds-remaining checkbox.
+If the browser blocks clipboard access, the panel exposes selectable text. This includes ordinary LAN HTTP pages. An item without a configured output slot shows a warning and its play-command copy buttons are disabled. It still exposes Copy ID. Importing a graphic alone does not assign its output slot yet.
 
-### One-button on/off controls
+## Download real button pages
 
-`POST /api/ycs/stages/stage-1/graphics/ticker/toggle` with body `{}` plays that graphic if it is absent from program, or stops it if active. Substitute the stage or graphic ID for another output/graphic. SPX decides inside the serialized stage command queue using actual program membership, so a change from a rundown or another controller is reflected by the next press. Preview selection and stale saved onair flags do not determine the action. Starting uses saved data/current committed mapping rules just like Play; stopping affects only that graphic.
+In the stage panel, expand **Companion button pages**, then choose:
 
-In Companion use a single Generic HTTP **POST** Press action with that URI, Body `{}` and Content Type `application/json`. Leave Release actions empty. No two-step Companion cycle or local variable is needed. Each request flips state once; duplicate presses/requests flip it twice. Explicit Play/Stop remain useful when a button must always produce one known state.
+- **Download Play / Stop buttons**: explicit Play, Update and Stop for each actual saved item.
+- **Download Toggle + Play / Stop buttons**: Toggle and Update, with explicit Play and Stop fallbacks.
 
-The generator also writes `YCS-Rehearsal-Toggle.companionconfig`, `YCS-Orlando-Toggle.companionconfig` and matching single-stage page files. These optional variants have one purple ON / OFF button per graphic, separate Update buttons and Stop Stage. Their colors still do not indicate live program state. The original explicit-control profiles remain available.
+Exports are read-only snapshots of the saved rundown. Button labels use saved nicknames, descriptions or template names. Every target is read from its actual saved ItemID; there are no assumed ticker/lower-third IDs or controls for missing demo items. Multiple copies of the same template are independent buttons. Each stage page has Stop Stage in its header and up to three graphic rows; additional items receive additional pages. CLI/all-stage exports also include overview pages.
 
-Green/blue/red identify the command type; they are **not active-state tally**. Companion's connection/button status icons indicate request errors. A successful request means the SPX server accepted it, not that vMix has placed the input on the final broadcast. Continuous program-state feedback is a separate next step; these profiles do not keep a latched success indicator that could be mistaken for live tally.
+Validation rejects missing/unknown output slots, duplicate/unsupported IDs, unsupported template paths and empty rundowns. Errors appear in SPX without navigating away or losing field drafts. Exporting never changes mappings, rundown content or program state.
 
-## Browser emulator rehearsal
+In Companion, open **Import / Export**, select the downloaded file, then use the **Buttons** tab to select and import pages into empty destinations. Map to an existing Generic HTTP connection or create the imported connection. A full import/reset can replace other configuration; use it only for a disposable test installation. The file contains labels, connection origin and commands, with no field values, source data, API keys, triggers or surface settings.
 
-1. Start the separate rehearsal with `npm run ycs:rehearsal`; open its three-output monitor.
-2. Import the rehearsal profile into a separate Companion test configuration. Confirm its connection base URL is port **5661** before pressing buttons.
-3. Open Companion's **Interactive Buttons** emulator, choose the overview page, then Play each stage's ticker and lower third. Verify the monitor shows different rounds on three outputs using the same ticker template URL.
-4. Stop one ticker and confirm its lower third and the other stages continue. Press Play twice and confirm it remains playing. Stop a graphic, then press Update: it must remain stopped.
-5. Save a manual round draft in that rehearsal rundown or through the test API, press Update, and verify only that stage changes. Stop Stage must clear only its row's output. A bad/unavailable endpoint must produce a connection error; restore its base URL before continuing.
+The imported connection Base URL is the SPX origin used for download. Change it to the central server's LAN address for switch-PC imports. Prepare only the appropriate stage's pages for each operator; keep overview pages on the central operator computer. HTTP authorization is enforced by the existing API rules. If a private ycs.apiKey is configured, add an Authorization Bearer header to the actions locally; exports deliberately omit it. Do not share subsequent Companion exports containing private headers.
 
-The development checkout's portable test uses an official, signature-verified Companion 5.1.1 runtime with separate configuration under the graphics repository's ignored `.local/companion-config`, and a loopback admin URL on port **8888**. It is separate from SPX and is not a Windows service or login-startup installation. A normal Companion installation can import the same generated profiles.
+## CLI generation
+
+From the SPX checkout:
+
+    node ycs/companion/generate.cjs .local/ycs-dev.json
+    node ycs/companion/generate.cjs .local/ycs-dev.json --base-url http://SPX-PC:5660 --name YCS-Orlando
+
+The CLI reads the configured project/rundown files and validates all items before writing. It creates **dist/companion/YCS-Orlando.companionconfig**, its **-Toggle** variant, and individual page files. The default origin is localhost with the configured server port. Changing --base-url only changes exported connection settings; it does not change SPX network binding. Files remain ignored; code is tracked in Git.
+
+CLI generation no longer invents rehearsal targets from the event configuration. To export the running isolated rehearsal's real IDs, download from:
+
+    http://127.0.0.1:5661/api/ycs/companion/export
+    http://127.0.0.1:5661/api/ycs/companion/export?style=toggle
 
 ## HTTP contract
 
-For the local development server, use base URL `http://127.0.0.1:5660`. Configure an HTTP POST action with Content-Type `application/json` and body `{}`.
+POST with JSON body {} to:
 
-| Button | POST URI |
-|---|---|
-| Stage 1 ticker: Play | `/api/ycs/stages/stage-1/graphics/ticker/play` |
-| Stage 1 ticker: Update saved values | `/api/ycs/stages/stage-1/graphics/ticker/update` |
-| Stage 1 ticker: Stop | `/api/ycs/stages/stage-1/graphics/ticker/stop` |
-| Stage 1 ticker: Toggle on/off | `/api/ycs/stages/stage-1/graphics/ticker/toggle` |
-| Stage 1 lower third: Play | `/api/ycs/stages/stage-1/graphics/lower-third/play` |
-| Stage 1 lower third: Stop | `/api/ycs/stages/stage-1/graphics/lower-third/stop` |
-| Stage 2 ticker: Play | `/api/ycs/stages/stage-2/graphics/ticker/play` |
-| Stop Stage 1 graphics | `/api/ycs/stages/stage-1/clear` |
+    /api/ycs/stages/STAGE_ID/graphics/ITEM_ID/play
+    /api/ycs/stages/STAGE_ID/graphics/ITEM_ID/stop
+    /api/ycs/stages/STAGE_ID/graphics/ITEM_ID/toggle
+    /api/ycs/stages/STAGE_ID/graphics/ITEM_ID/update
+    /api/ycs/stages/STAGE_ID/clear
 
-Change `stage-1` to `stage-2`/`stage-3` for the other stages. Choose explicit Play/Stop or the server-side Toggle action as needed. The graphic ID comes from its stable rundown `itemID`, not its position or browser selection. Use the rundown to edit values and visibility controls.
+Play uses saved data/current mappings. Update applies saved changes to an active item; it cannot start a stopped graphic. Toggle resolves against actual program inside the stage queue, so an intervening rundown command is reflected by the next press. Each successful request flips once; duplicate requests flip twice. Use one Press action and no Release action. Manual/linked changes and rounds-remaining controls stay in the rundown.
 
-A successful request returns a JSON program snapshot. Failures return a non-2xx status and `error`; do not display a successful action solely because a request was sent. Snapshot state represents the server's active composition, not proof that vMix has placed the input on the final broadcast. Renderer/vMix confirmation is not implemented yet.
+A successful response is the server's composition, not proof that vMix has put it on broadcast. Non-2xx responses must be treated as failed commands. Colours identify action types, not continuous program/vMix tally. Nicknames are display labels; ItemIDs are the command targets.
 
-Useful GET endpoints:
+Read-only export routes (existing operator/API authorization and origin checks apply):
 
-- `/api/ycs/stages` — stage controllers.
-- `/api/ycs/stages/stage-1/graphics` — available graphic IDs and slots.
-- `/api/ycs/stages/stage-1/program/state` — active program composition.
-- `/api/ycs/stages/stage-1/preview/state` — independent pending preview composition.
+    GET /api/ycs/companion/export?style=explicit|toggle
+    GET /api/ycs/stages/STAGE_ID/companion?style=explicit|toggle
 
-For a future LAN deployment, set the imported connection's Base URL to the SPX server's LAN address after configuring its bind address. Configure a private `ycs.apiKey` and add `{"Authorization":"Bearer YOUR_TOKEN"}` to each action's Header JSON locally. The generator deliberately includes no token. Header values can be present in exports even when “Include secrets” is off, so remove credentials before sharing an export. Import only the matching stage's page on each switch PC; keep the overview on the central control computer. The current demo binds to loopback, so it is intentionally accessible only on the development computer. LAN/vMix and physical surface validation remain outstanding.
+Add page=NUMBER to request a single-page export. Stage exports include only that stage; all-stage exports include overview pages. Neither export route executes commands or embeds credentials.
 
-Documentation: [Companion](https://companion.free/), [import/export](https://companion.free/user-guide/v5.1/config/import-export/) and [Generic HTTP module](https://github.com/bitfocus/companion-module-generic-http/blob/master/companion/HELP.md). The generator's schema was checked against an actual exported page from 5.1.1 as well as its official export models; no Companion source was copied into this project.
+## Rehearsal
+
+Start the separate rehearsal and import its exported buttons into a disposable Companion configuration. Use **Interactive Buttons** to test Play twice, Update on a stopped item, Toggle after a command from another controller, simultaneous graphics, individual Stop, and stage-only Stop. Verify other stages remain unchanged. Test missing targets and source outages. Actual venue LAN/vMix and physical surfaces still need validation; this does not add continuous tally.
