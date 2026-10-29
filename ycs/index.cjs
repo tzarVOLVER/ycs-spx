@@ -96,7 +96,7 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     // The graphics repository/package keeps reusable helpers and templates beside ticker.
     const root = path.resolve(settings.graphicsRoot);
     app.use('/templates/ycs/ticker', express.static(root));
-    for (const folder of ['shared', 'lower-third'])
+    for (const folder of ['shared', 'lower-third', 'match-status'])
       app.use('/templates/ycs/' + folder, express.static(path.join(root, '..', folder)));
   }
   app.use('/templates/ycs-system', express.static(path.join(__dirname, 'templates')));

@@ -137,7 +137,7 @@ if (stage) {
       const label = document.createElement('label'); input.id ||= `ycs-${row.dataset.spxEpoch}-${field.field}`; label.htmlFor = input.id; label.textContent = field.title==='Rounds remaining text'?'Remaining text':field.title || field.field;
       if (field.ftype === 'checkbox') { input.classList.add('ycs-check');wrapper.classList.add('ycs-checkbox-field');wrapper.append(input, label);toggles.append(wrapper);continue; }
       else wrapper.append(label, input);
-      if(field.ycsCollection){const group=document.createElement('details');group.className='ycs-advanced';const summary=document.createElement('summary');summary.textContent=field.title||'Stories';summary.title='Manual JSON fallback. Link this field to use its mapped story list.';group.append(summary,wrapper);content.append(group);}else (['number', 'filelist', 'textarea'].includes(field.ftype) ? advanced : content).append(wrapper);
+      if(field.ycsCollection){const group=document.createElement('details');group.className='ycs-advanced';const summary=document.createElement('summary');summary.textContent=field.title||'Stories';summary.title='Manual JSON fallback. Link this field to use its mapped story list.';group.append(summary,wrapper);content.append(group);}else (field.ycsPrimary !== true && ['number', 'filelist', 'textarea'].includes(field.ftype) ? advanced : content).append(wrapper);
     }
     if (advanced.children.length === 1) advanced.hidden = true;
     for (const info of row.querySelectorAll('#Expanded td.aright.spxTableHeadsmall')) info.closest('tr').hidden = true;

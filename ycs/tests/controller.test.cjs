@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
-async function controller(t, compact = false, previewOnEdit = true) {
+async function controller(t, compact = false, previewOnEdit = true, primary = false) {
   const dom = new JSDOM(
     `<html data-ycs-stage="stage-1" data-ycs-project="Stage1" data-ycs-rundown="Show"><head></head><body><div id="controllerPluginButtons"></div><iframe id="previewIF"></iframe>
     <div class="itemrow inFocus" data-spx-epoch="ticker"><div class="truncate"></div><div id="Expanded" style="display:block"></div>
@@ -37,6 +37,10 @@ async function controller(t, compact = false, previewOnEdit = true) {
       input.checked = type === 'checkbox';
       input.className = 'gcinput';
       cell.append(input);
+    }
+    if (primary) {
+      const flags=window.document.createElement('select'); flags.dataset.update='f7';
+      flags.innerHTML='<option value="./assets/us.png">us.png</option>';cell.append(flags);
     }
   }
   let revision = 0,
@@ -84,7 +88,8 @@ async function controller(t, compact = false, previewOnEdit = true) {
               { field: 'f0', ftype: 'hidden', title: 'Identity' },
               { field: 'f2', ftype: 'checkbox', title: 'Show rounds remaining' },
               { field: 'f5', ftype: 'textfield', title: 'Current round' },
-              { field: 'f8', ftype: 'number', title: 'Crawl speed' },
+              { field: 'f8', ftype: 'number', title: 'Crawl speed', ...(primary?{ycsPrimary:true}:{}) },
+              ...(primary?[{field:'f7',ftype:'filelist',title:'Left flag',ycsPrimary:true}]:[]),
               {
                 field: 'f14',
                 ftype: 'textarea',
@@ -519,4 +524,15 @@ test('templates can defer checkbox, text and link edits until an explicit comman
   assert.ok(r.posts.at(-1).url.endsWith('/play'));
   await r.window.updateItem(r.row);
   assert.ok(r.posts.at(-1).url.endsWith('/update'));
+});
+
+test('primary field metadata keeps match score and flag controls inline without changing other templates',async t=>{
+  const r=await controller(t,true,true,true), content=r.row.querySelector('.ycs-editor-content');
+  assert.equal(content.contains(r.row.querySelector('[data-update="f8"]')),true);
+  assert.equal(content.contains(r.row.querySelector('[data-update="f7"]')),true);
+  assert.equal(r.row.querySelector('.ycs-compact-editor > .ycs-advanced').hidden,true);
+  await r.window.saveTemplateItemChangesByElement(r.row);
+  assert.equal(r.posts.at(-1).body.fields.find(field=>field.field==='f7').value,'./assets/us.png');
+  const normal=await controller(t,true);
+  assert.equal(normal.row.querySelector('.ycs-compact-editor > .ycs-advanced').contains(normal.row.querySelector('[data-update="f8"]')),true);
 });

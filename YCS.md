@@ -284,3 +284,7 @@ API: `POST /api/ycs/data/local/test` accepts `{type:'local-json'|'local-csv',set
 Templates may set `ycsPreviewOnEdit: false` to keep checkbox, text, layout and link edits in the editor until explicit Preview, Play or Update. Other templates retain automatic edit previews. Save keeps Program unchanged; Companion Focus/Play reads saved values. This optional metadata is specific to the YCS fork.
 
 The graphics repository now includes `graphics/lower-third/lower-third.html`: one reusable template with 1–4 fixed nameplate layouts, per-plate Show checkboxes and fitting name/title text. It uses the `lower-third` slot and has no appearance/timing fields. Install its package with shared helpers/fonts intact. The existing `graphicsRoot` ticker development mount also serves sibling `shared` and `lower-third` directories.
+
+## Match status templates
+
+The graphics repository provides separate shuffling.html and siding.html entries in graphics/match-status. Both use the lower-third slot, with fixed captions and one Show rounds remaining checkbox; Siding adds score fields. Templates may mark an individual DataField with ycsPrimary: true to keep an important number or asset selector in the main editor. Existing templates retain the normal Appearance & timing grouping. The development graphics mount includes the sibling match-status directory.
