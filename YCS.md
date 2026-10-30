@@ -292,3 +292,7 @@ The graphics repository provides separate shuffling.html and siding.html entries
 ## Application settings persistence
 
 The stock application settings form preserves the existing server-owned ycs configuration when saving and reloading. Posted ycs values are ignored; stock installations without that section remain unchanged. This retains stage routing, graphics/source paths, slot policies and API settings without placing credentials in hidden form fields. The save handler awaits persistence and reload before reporting success.
+
+## Double-click launcher
+
+Run Start SPX.cmd from the repository root, or create a desktop shortcut to it. It starts the saved runtime only when needed and opens the SPX homepage after readiness. The server runs in the background; closing the browser does not stop it. Startup errors remain visible. No dependencies or new settings UI are added. The wrapper uses a process-only PowerShell execution-policy override; system policy is not changed. Advanced arguments: -Config PATH, -NodePath PATH, and -NoBrowser. Node is resolved from PATH or the last runtime's recorded executable.
