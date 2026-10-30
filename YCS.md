@@ -288,3 +288,7 @@ The graphics repository now includes `graphics/lower-third/lower-third.html`: on
 ## Match status templates
 
 The graphics repository provides separate shuffling.html and siding.html entries in graphics/match-status. Both use the lower-third slot, with fixed captions and one Show rounds remaining checkbox; Siding adds score fields. Templates may mark an individual DataField with ycsPrimary: true to keep an important number or asset selector in the main editor. Existing templates retain the normal Appearance & timing grouping. The development graphics mount includes the sibling match-status directory.
+
+## Application settings persistence
+
+The stock application settings form preserves the existing server-owned ycs configuration when saving and reloading. Posted ycs values are ignored; stock installations without that section remain unchanged. This retains stage routing, graphics/source paths, slot policies and API settings without placing credentials in hidden form fields. The save handler awaits persistence and reload before reporting success.
