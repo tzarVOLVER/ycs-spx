@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>YCS Orlando · Three-stage rehearsal</title>
+<link rel="stylesheet" href="/rehearsal/assets/rehearsal.css">
+<script type="module" src="/rehearsal/assets/rehearsal.js"></script></head>
+<body>
+<header><div><p class="eyebrow">LOCAL REHEARSAL · SIMULATED DATA</p><h1>YCS Orlando · Three stages</h1>
+<p>The real ticker templates and output service, with disposable rundowns. Sheets and JSON feeds are simulated locally.</p></div>
+<div class="actions"><button id="run" class="primary">Run playback checks</button><button id="restart">Test server restart</button><button id="clear">Stop all test outputs</button></div></header>
+<p id="status" role="status">Connecting to the rehearsal…</p>
+<main id="stages" aria-label="Stage rehearsal outputs"></main>
+<section class="results"><h2>Check results</h2><p>Run playback checks first. Then test a server restart while the graphics are visible. Restart must reconnect every output and leave it stopped.</p><ol id="results" aria-live="polite"></ol></section>
+<details><summary>What this verifies</summary><p>Stage-specific data, overlapping graphics, draft versus on-air updates, live round changes, Sheets/JSON story lists, filtering and ordering, held data during a simulated source outage, output reloads, transport reconnects, and stopped program after a real rehearsal-worker restart.</p><p>It does not verify a venue network, three computers' performance, vMix rendering, external source latency, or physical Stream Deck operation. This page is available only from the separate loopback rehearsal process.</p></details>
+</body></html>

@@ -120,3 +120,12 @@ test('stage events are scoped and snapshots are detached from internal state', a
 
 }
 module.exports = { fixture };
+
+if (require.main === module) test('editor exposes template-specific preview policy and preserves other template defaults', async t => {
+  const { playback, repository } = await fixture(t);
+  const show = await repository.read('stage-1');
+  show.templates[1].ycsPreviewOnEdit = false;
+  await repository.write('stage-1', show);
+  assert.equal((await playback.editor('stage-1', 'lower-third')).previewOnEdit, false);
+  assert.equal((await playback.editor('stage-1', 'ticker')).previewOnEdit, true);
+});

@@ -208,7 +208,7 @@
     "github": "Open SPX project page in GitHub",
     "help": "Open help about this section",
     "htmlfolder": "Absolute folder path to CasparCG template folder?",
-    "item": "Double click (or Enter) to open / close item editor. Drag to sort items.",
+    "item": "Double click to open item editor. Enter to open / close. Drag to sort items.",
     "lang": "User interface language? (You can create new language files to locales-folder as needed)",
     "logfolder": "Folder for log files",
     "loglevel": "Logging level? Default level: info. Most log information: debug.",

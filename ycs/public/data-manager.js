@@ -1,0 +1,419 @@
+const $ = (id) => document.getElementById(id);
+let state,
+  stages = [],
+  loading = false,
+  disposed = false,
+  editingId = null,
+  tested = '',
+  draftRevision;
+function node(tag, text, className) {
+  const element = document.createElement(tag);
+  if (text !== undefined) element.textContent = text;
+  if (className) element.className = className;
+  return element;
+}
+function option(select, value, title) {
+  const result = node('option', title);
+  result.value = value;
+  select.append(result);
+}
+function label(title, input) {
+  const result = node('label', title);
+  result.append(input);
+  return result;
+}
+function button(title, callback) {
+  const result = node('button', title);
+  result.type = 'button';
+  result.addEventListener('click', () =>
+    Promise.resolve(callback()).catch((error) => message(error.message, true))
+  );
+  return result;
+}
+function message(text, error = false) {
+  $('message').textContent = text;
+  $('message').classList.toggle('error', error);
+}
+async function request(url, body) {
+  const response = await fetch(
+    '/api/ycs' + url,
+    body === undefined
+      ? { cache: 'no-store' }
+      : {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }
+  );
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'Request failed');
+  return result;
+}
+function showTab(name) {
+  for (const tab of ['sources', 'mappings']) {
+    $(tab + '-tab').setAttribute('aria-selected', String(name === tab));
+    $(tab + '-view').hidden = name !== tab;
+  }
+}
+$('sources-tab').onclick = () => showTab('sources');
+$('mappings-tab').onclick = () => showTab('mappings');
+function time(value) {
+  return value ? new Date(value).toLocaleTimeString() : 'Waiting for first read';
+}
+function usageText(usage) {
+  return `${stages.find((stage) => stage.id === usage.stage)?.title || usage.stage} · ${usage.graphic || 'Template default'} · ${usage.field}${usage.kind === 'on-air' ? ' · ON AIR' : ''}`;
+}
+function renderConnections() {
+  const container = $('connections');
+  container.replaceChildren();
+  for (const [id, connection] of Object.entries(state.connections || {})) {
+    const card = node('article', undefined, 'connection'),
+      top = node('div', undefined, 'connection-top'),
+      badge = node(
+        'span',
+        connection.health === 'ok'
+          ? 'Connected'
+          : connection.health === 'loading'
+            ? 'Connecting'
+            : 'Needs attention',
+        'status'
+      );
+    badge.classList.toggle('warning', connection.health !== 'ok');
+    top.append(node('h3', connection.label), badge);
+    const actions = node('div', undefined, 'connection-actions');
+    actions.append(
+      button('Refresh', async () => {
+        state = await request(`/data/connections/${id}/refresh`, {});
+        renderConnections();
+        refreshValues();
+      }),
+      button('Edit', () => openConnection(id))
+    );
+    const remove = button('Remove', async () => {
+      state = await request(`/data/connections/${id}/remove`, { revision: state.revision });
+      renderConnections();
+      message('Connection removed.');
+    });
+    remove.disabled = connection.usages.length > 0;
+    remove.title = remove.disabled
+      ? 'Remove its field mappings and stop linked on-air graphics first'
+      : 'Remove unused connection';
+    actions.append(remove);
+    top.append(actions);
+    card.append(
+      top,
+      node(
+        'p',
+        `${YCSSourceTypes.isLocal(connection) ? connection.settings.file : connection.type === 'json-api' ? 'JSON API' : connection.settings.worksheet + ' · ' + connection.settings.range} · ${connection.project || 'Shared'} · Every ${connection.settings.refreshSeconds}s · Last read ${time(connection.lastSuccess)}`,
+        'meta'
+      )
+    );
+    if (connection.error || connection.warning)
+      card.append(
+        node(
+          'p',
+          (connection.error || connection.warning) + ' · Holding last valid values.',
+          'warning'
+        )
+      );
+    const details = node('details');
+    details.append(
+      node(
+        'summary',
+        `${connection.usages.length} field reference${connection.usages.length === 1 ? '' : 's'}`
+      )
+    );
+    const list = node('ul');
+    for (const usage of connection.usages) list.append(node('li', usageText(usage)));
+    if (!connection.usages.length) list.append(node('li', 'Ready to assign from Mappings.'));
+    details.append(list);
+    card.append(details);
+    container.append(card);
+  }
+  if (!container.children.length)
+    container.append(
+      node(
+        'div',
+        'No connections yet. Add a Google Sheet, JSON API or local JSON/CSV file to get started.',
+        'empty'
+      )
+    );
+}
+function renderLocal() {
+  $('local-sources').replaceChildren();
+  for (const [id, source] of Object.entries(state.sources))
+    if (source.type === 'local') {
+      const form = node('form', undefined, 'local-value'),
+        input = node('input');
+      input.value = source.value;
+      input.maxLength = 300;
+      input.required = true;
+      const save = node('button', 'Publish test value');
+      save.type = 'submit';
+      form.append(label(source.label, input), save);
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        save.disabled = true;
+        try {
+          const revision = state.revision;
+          state = await request('/data/source', { id, value: input.value, revision });
+          workspace.acceptRevision(revision, state.revision);
+          message('Test value published to committed linked fields.');
+        } catch (error) {
+          message(error.message, true);
+        } finally {
+          save.disabled = false;
+        }
+      };
+      $('local-sources').append(form);
+    }
+}
+function settings() {
+  const refreshSeconds = Number($('sheet-refresh').value),
+    type = $('connection-type').value;
+  if (YCSSourceTypes.isLocal(type))
+    return {
+      ...localFile.settings(),
+      refreshSeconds,
+      ...(type === 'local-csv' ? { delimiter: $('csv-delimiter').value } : {})
+    };
+  const common = { url: $('sheet-url').value, refreshSeconds };
+  return type === 'json-api'
+    ? {
+        ...common,
+        ...($('json-token').value.trim() ? { tokenEnv: $('json-token').value.trim() } : {})
+      }
+    : { ...common, worksheet: sheetPicker.worksheet, range: $('sheet-range').value };
+}
+function fingerprint() {
+  return JSON.stringify({
+    type: $('connection-type').value,
+    project: $('connection-project').value,
+    settings: settings()
+  });
+}
+function connectionType() {
+  const type = $('connection-type').value,
+    json = type === 'json-api',
+    local = YCSSourceTypes.isLocal(type),
+    sheet = type === 'google-sheets';
+  $('sheet-connection-fields').hidden = !sheet;
+  $('sheet-tabs-status').hidden = !sheet;
+  $('manual-worksheet-field').hidden = !sheet || $('sheet-worksheet').value !== '__manual__';
+  $('json-token-field').hidden = !json;
+  $('json-source-help').hidden = !json;
+  $('local-file-fields').hidden = !local;
+  $('csv-delimiter-field').hidden = type !== 'local-csv';
+  $('local-file').required = local;
+  $('local-file').disabled = !local || Boolean(state.connections[editingId]?.usages.length);
+  $('csv-delimiter').disabled =
+    type !== 'local-csv' || Boolean(state.connections[editingId]?.usages.length);
+  $('sheet-url-label').hidden = local;
+  $('sheet-url').disabled = local;
+  $('connection-help').textContent = local
+    ? 'Paste the full path to a JSON or CSV file accessible to the SPX computer. Test it, then save. Changes to the file refresh linked graphics automatically.'
+    : json
+      ? 'Connect a read-only public HTTPS JSON API. Optional Bearer credentials stay in the server environment.'
+      : 'Use a sheet shared with Anyone with the link as Viewer. No sign-in or API key.';
+  $('source-url-title').textContent = json ? 'JSON API URL' : 'Google Sheets URL';
+  sheetPicker.enabled = sheet;
+}
+function openConnection(id = null) {
+  editingId = id;
+  tested = '';
+  draftRevision = state.revision;
+  const connection = state.connections[id];
+  $('connection-form').reset();
+  $('connection-type').value = connection?.type || 'google-sheets';
+  $('connection-type').disabled = Boolean(connection?.usages.length);
+  $('connection-project').value = connection?.project || '';
+  $('connection-project').disabled = Boolean(connection?.usages.length);
+  $('json-token').value = connection?.settings.tokenEnv || '';
+  $('sheet-label').value = connection?.label || '';
+  $('sheet-url').value = connection?.settings.url || '';
+  $('sheet-range').value = connection?.settings.range || 'A1:D4';
+  $('sheet-refresh').value = connection?.settings.refreshSeconds || 5;
+  $('csv-delimiter').value = connection?.settings.delimiter || ',';
+  $('connection-title').textContent = id ? 'Edit connection' : 'Add connection';
+  $('sheet-preview').replaceChildren();
+  $('sheet-test-status').textContent = '';
+  $('save-sheet').disabled = true;
+  $('connection-usage').textContent = connection?.usages.length
+    ? `Used by ${connection.usages.length} field references. You can change its name or refresh interval. Add a new connection to change its location, file, delimiter, sheet, tab or range.`
+    : '';
+  for (const key of ['sheet-url', 'sheet-range'])
+    $(key).readOnly = Boolean(connection?.usages.length);
+  $('connection-dialog').showModal();
+  sheetPicker.reset({
+    worksheet: connection?.settings.worksheet || '',
+    locked: Boolean(connection?.usages.length),
+    enabled: !connection || connection.type === 'google-sheets'
+  });
+  connectionType();
+  localFile.reset({
+    file: connection?.settings.file || '',
+    location: connection?.settings.location,
+    locked: Boolean(connection?.usages.length)
+  });
+  $('sheet-label').focus();
+}
+$('add-connection').onclick = () => openConnection();
+$('close-connection').onclick = () => $('connection-dialog').close();
+function invalidateSheetTest() {
+  tested = '';
+  $('save-sheet').disabled = true;
+  $('sheet-test-status').textContent = 'Test the updated settings before saving.';
+}
+const localFile = new window.YCSLocalFileField({ request });
+const sheetPicker = new window.YCSSheetPicker({ request, invalidate: invalidateSheetTest });
+$('connection-type').onchange = () => {
+  connectionType();
+  localFile.reset();
+  invalidateSheetTest();
+};
+$('connection-project').onchange = invalidateSheetTest;
+for (const input of document.querySelectorAll('[data-setting]'))
+  input.addEventListener('input', invalidateSheetTest);
+function previewTable(data) {
+  $('sheet-preview').replaceChildren();
+  const table = node('table'),
+    body = node('tbody');
+  for (const cells of data.slice(0, 10)) {
+    const row = node('tr');
+    row.append(node('th', cells[0]?.address.match(/\d+$/)?.[0] || ''));
+    for (const cell of cells.slice(0, 8)) {
+      const value = node('td', cell.value);
+      value.title = cell.address;
+      row.append(value);
+    }
+    body.append(row);
+  }
+  table.append(body);
+  $('sheet-preview').append(
+    table,
+    node('p', 'Preview: first 10 rows and 8 columns. Values remain read-only.', 'hint')
+  );
+}
+$('test-sheet').onclick = async () => {
+  const submitted = fingerprint();
+  const submittedSettings = settings(),
+    type = $('connection-type').value,
+    json = YCSSourceTypes.isJSON(type),
+    local = YCSSourceTypes.isLocal(type);
+  $('test-sheet').disabled = true;
+  $('save-sheet').disabled = true;
+  $('sheet-test-status').textContent = 'Reading source…';
+  try {
+    const result = await request(
+      local ? '/data/local/test' : json ? '/data/json/test' : '/data/sheets/test',
+      { settings: submittedSettings, ...(local ? { type } : {}) }
+    );
+    if (submitted !== fingerprint()) return;
+    tested = submitted;
+    if (json) {
+      $('sheet-preview').replaceChildren(
+        node('pre', JSON.stringify(result.data, null, 2).slice(0, 12000))
+      );
+    } else previewTable(result.rows);
+    $('sheet-test-status').textContent = 'Connected. Choose fields from Mappings after saving.';
+    $('save-sheet').disabled = false;
+  } catch (error) {
+    tested = '';
+    $('sheet-test-status').textContent = error.message;
+  } finally {
+    $('test-sheet').disabled = false;
+  }
+};
+$('connection-form').onsubmit = async (event) => {
+  event.preventDefault();
+  if (tested !== fingerprint()) return;
+  $('save-sheet').disabled = true;
+  try {
+    const result = await request('/data/connections', {
+      id: editingId,
+      label: $('sheet-label').value,
+      settings: settings(),
+      type: $('connection-type').value,
+      project: $('connection-project').value || undefined,
+      revision: draftRevision
+    });
+    workspace.acceptRevision(draftRevision, result.snapshot.revision);
+    state = result.snapshot;
+    $('connection-dialog').close();
+    renderConnections();
+    if (workspace.model) {
+      workspace.renderSources();
+      workspace.renderSourceContext();
+      workspace.renderSourceValues();
+    }
+    message('Connection saved. Assign its fields in Mappings.');
+  } catch (error) {
+    $('sheet-test-status').textContent = error.message;
+    $('save-sheet').disabled = false;
+  }
+};
+const workspace = new window.YCSMappingWorkspace({
+  request,
+  getState: () => state,
+  message,
+  onSaved: (data) => {
+    state = data;
+    renderConnections();
+  }
+});
+function refreshValues() {
+  workspace.update(state);
+}
+async function poll() {
+  if (loading || disposed) return;
+  loading = true;
+  try {
+    state = await request('/data');
+    $('health').textContent =
+      state.health === 'ok' ? 'Background sync active' : 'Data needs attention';
+    $('health').classList.toggle('warning', state.health !== 'ok');
+    if (
+      !document.querySelector('#connections details[open]') &&
+      !document.activeElement?.closest('#connections')
+    )
+      renderConnections();
+    refreshValues();
+  } catch {
+    $('health').textContent = 'Server disconnected';
+    $('health').classList.add('warning');
+  } finally {
+    loading = false;
+  }
+}
+async function initialize() {
+  [state, stages] = await Promise.all([request('/data'), request('/stages')]);
+  for (const project of [...new Set(stages.map((stage) => stage.project).filter(Boolean))])
+    option($('connection-project'), project, project.replaceAll('-', ' '));
+  for (const stage of stages) {
+    const link = node('a', stage.title + ' rundown');
+    link.href = stage.controller;
+    $('stages').append(link);
+    option($('mapping-stage'), stage.id, stage.title);
+  }
+  const params = new URLSearchParams(location.search);
+  if (stages.some((stage) => stage.id === params.get('stage')))
+    $('mapping-stage').value = params.get('stage');
+  if (params.get('graphic')) showTab('mappings');
+  renderConnections();
+  renderLocal();
+  await workspace.initialize(stages);
+  await poll();
+}
+initialize().catch((error) => message(error.message, true));
+const timer = setInterval(poll, 3000);
+window.addEventListener(
+  'pagehide',
+  () => {
+    disposed = true;
+    sheetPicker.dispose();
+    localFile.dispose();
+    workspace.dispose();
+    clearInterval(timer);
+  },
+  { once: true }
+);

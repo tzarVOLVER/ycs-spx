@@ -6,9 +6,11 @@
   <title>YCS stage output</title>
   <style>
     *{box-sizing:border-box}html,body{width:1920px;height:1080px;margin:0;overflow:hidden;background:transparent}
+    html[data-mode="preview"] body{background:url('/img/checker60.png') repeat}
     #composition{position:relative;width:1920px;height:1080px}
     .graphic{position:absolute;inset:0;width:1920px;height:1080px;border:0;background:transparent}
   </style>
+  <script src="/js/socket.io.js"></script>
   <script type="module" src="/ycs/output.js"></script>
 </head>
 <body><main id="composition" aria-label="Stage graphics composition"></main></body>

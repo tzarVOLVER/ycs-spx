@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 {{>copyright }}
 
-<html lang="en" {{#if ycsStage}}data-ycs-stage="{{ycsStage.id}}"{{/if}}>
+<html lang="en" {{#if ycsStage}}data-ycs-stage="{{ycsStage.id}}" data-ycs-project="{{ycsStage.project}}" data-ycs-rundown="{{ycsStage.rundown}}"{{/if}}>
 
 <head>
   <meta charset="UTF-8">
@@ -19,7 +19,7 @@
     var socket = io();
   </script>
   <script src="/js/spx_gc.js"></script>
-  {{#if ycsStage}}<script type="module" src="/ycs/controller.js"></script>{{/if}}
+  {{#if ycsStage}}<script defer src="/ycs/data-contract.js"></script><script defer src="/ycs/companion-contract.js"></script><script defer src="/ycs/companion-tools.js"></script><script defer src="/ycs/stage-panel.js"></script><script type="module" src="/ycs/controller.js"></script>{{/if}}
 
       <script>
     // Make the DIV element draggable:
@@ -543,7 +543,7 @@
                     data-spx-timerid   = ""
                     data-spx-stepsleft = "{{steps}}"
                     onClick            = "focusRow(this);"
-                    ondblclick         = "ToggleExpand(this);"
+                    ondblclick         = "if (this.querySelector('#Collapsed').style.display !== 'none') ToggleExpand(this);"
                     old-ondblclick     = "ToggleExpand({{@index}});"
                     onmouseover        = "tip('{{lang 'hover.item'}}');">
 
@@ -608,7 +608,7 @@
                       <table class="wide" style="border-spacing: 2px; margin-top: 2px;">
                         <TR>
                           <TD colspan="2" class="vmid spxTableHeadsmall" style="height: 1.6em; text-transform:uppercase;">
-                            <span><!--item {{@index}} &nbsp;&middot;&nbsp;-->{{{ nameFromTemplatePath relpath }}}
+                            <span><span data-ycs-item-title>{{#if ycsNickname}}{{ycsNickname}}{{else}}{{{ nameFromTemplatePath relpath }}}{{/if}}</span>
                               {{#if description}}
                               <span class="delim"></span> <span style="opacity:0.5;">{{description}}</span>
                               {{/if}}
@@ -633,7 +633,7 @@
                       <table class="wide" style="border-spacing: 2px; margin-top:2px;">
                         <TR>
                           <TD colspan="3" class="vmid spxTableHeadsmall" style="height: 1.6em; text-transform:uppercase;">
-                            <span>{{{nameFromTemplatePath relpath}}}</span>&nbsp;&nbsp;
+                            <span data-ycs-item-title>{{#if ycsNickname}}{{ycsNickname}}{{else}}{{{nameFromTemplatePath relpath}}}{{/if}}</span>&nbsp;&nbsp;
 
                             <!-- disabled by default, enable with config -->
                             <i class="l-icon fas fa-edit {{{allowOpeningFolder}}}" onClick="openRelpathFolder(this.closest('.itemrow'));"  onmouseover="tip('{{lang 'button.edit'}}');"></i>

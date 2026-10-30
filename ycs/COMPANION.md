@@ -1,29 +1,39 @@
-# Companion: explicit stage and graphic commands
+# Companion setup
 
-Use Companion's **Generic HTTP Requests** connection for the first integration. A custom module is not required for Play/Stop. Its browser emulator can exercise these actions without a physical Stream Deck.
+Use the standard **Generic: HTTP Requests** connection in Companion. No custom SPX module, generated buttons or import files are needed. Each separate Companion installation needs this module/connection available and configured. A computer only displaying an SPX browser output needs neither Companion nor this module. Stream Decks connected to a central Companion installation, including through Satellite, use that installation's connections.
 
-For the local development server, use base URL `http://127.0.0.1:5660`. Configure an HTTP POST action with Content-Type `application/json` and body `{}`.
+## Create a button
 
-| Button | POST URI |
-|---|---|
-| Stage 1 ticker: Play | `/api/ycs/stages/stage-1/graphics/ticker/play` |
-| Stage 1 ticker: Stop | `/api/ycs/stages/stage-1/graphics/ticker/stop` |
-| Stage 1 lower third: Play | `/api/ycs/stages/stage-1/graphics/lower-third/play` |
-| Stage 1 lower third: Stop | `/api/ycs/stages/stage-1/graphics/lower-third/stop` |
-| Stage 2 ticker: Play | `/api/ycs/stages/stage-2/graphics/ticker/play` |
-| Stop Stage 1 graphics | `/api/ycs/stages/stage-1/clear` |
+1. In Companion's Connections, add **Generic: HTTP Requests**. Install its module through Companion if it is not already available.
+2. Open the item in the SPX rundown. In its **Companion** row, choose an action and click the copy icon.
+3. Add a **GET** action to the Companion button's **Press** actions and paste the copied URL. No body or Content Type is needed. Leave Release empty. Existing POST actions with JSON body **{}** still work at the same URL.
 
-Change `stage-1` to `stage-2`/`stage-3` for the other stages. Always use explicit Play and Stop actions. The graphic ID comes from its stable rundown `itemID`, not its position or browser selection. Use the rundown to edit values and visibility controls.
+The copied URL is complete, so Generic HTTP ignores its optional Base URL. Open SPX using the central computer's LAN hostname/IP before copying for another PC. A localhost address always refers to the machine running Companion. See the module's [official guide](https://github.com/bitfocus/companion-module-generic-http/blob/master/companion/HELP.md).
 
-A successful request returns a JSON program snapshot. Failures return a non-2xx status and `error`; do not display a successful action solely because a request was sent. Snapshot state represents the server's active composition, not proof that vMix has placed the input on the final broadcast. Renderer/vMix confirmation is not implemented yet.
+On the server, remote Companion requests require the existing `ycs.apiKey` setting and an `Authorization: Bearer YOUR_KEY` action header unless authenticated as an operator. The server must listen on the reachable LAN address. This UI change does not change binding, firewall or authorization settings. Do not put private tokens in URLs.
 
-Useful GET endpoints:
+## Item API
 
-- `/api/ycs/stages` — stage controllers.
-- `/api/ycs/stages/stage-1/graphics` — available graphic IDs and slots.
-- `/api/ycs/stages/stage-1/program/state` — active program composition.
-- `/api/ycs/stages/stage-1/preview/state` — independent pending preview composition.
+Use GET, or POST with an empty JSON object, at the same address:
 
-For a future LAN deployment, use the server's LAN address after configuring its bind address. Configure a private `ycs.apiKey` and pass `Authorization: Bearer YOUR_TOKEN` in Companion's headers. Do not commit or include the token in exported public profiles. The current demo binds to loopback, so it is intentionally accessible only on the development computer.
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/play
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/stop
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/toggle
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/update
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/focus
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/preview
+    http://SPX-PC:5660/api/PROJECT/RUNDOWN/ITEM_ID/continue
 
-Documentation: [Companion emulator](https://companion.free/user-guide/v4.1/sidebar/emulator/) and [Generic HTTP module](https://github.com/bitfocus/companion-module-generic-http/blob/master/companion/HELP.md).
+- **Focus** uses `/focus`; `/select` remains an alias for older buttons. It prepares the item in that output's Preview using saved fields and current mappings, then highlights the matching row in open controllers and selects their Preview monitor. It works even if no controller is open. Program and saved rundown bytes are unchanged. Local unsaved editor values remain intact; a brief message reminds you to save them before Companion Play. A failed preview does not move focus. Reconnecting does not replay old focus commands.
+- **Play** uses saved fields and current mappings. Repeated Play updates the active item without replaying its entrance.
+- **Stop** removes that item from program.
+- **Toggle** checks actual program inside the output queue and chooses Play or Stop. Use one Press action, with no Release action: duplicate requests toggle twice. Opening or refreshing a Toggle URL in the browser executes it again.
+- **Update** applies saved changes to an active item; it does not start a stopped item.
+- **Preview** previews saved data. It is separate from Focus and from a local editor's unsaved draft.
+- **Continue** advances a running template with continuation steps; unsupported or inactive items return an error.
+
+Project and rundown must match exactly one configured output in `ycs.stages`. Unknown/unconfigured pairs return 404; ambiguous pairs return 409. This address format does not automatically provision outputs for new projects. Native editor, data and renderer internals retain existing stage routes for compatibility. The public item API does not accept field edits. GET and POST share the same authorization and playback queue. Responses are marked no-store; HEAD and other methods return 405 without executing commands.
+
+Nickname changes and reordering do not change the item ID. Deleting and re-adding an item creates a different ID, so copy its new URL. The compact copy control never executes an action. Hover the icon to inspect its target; selectable text appears if clipboard access is blocked. An item without an output slot disables action copying until a slot is assigned.
+
+Successful HTTP responses describe server state, not vMix broadcast tally. Check failed/non-2xx commands in Companion's connection status/log. Test on the separate rehearsal first. Venue LAN/vMix and physical surfaces still need validation.

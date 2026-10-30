@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "sourceSha256": "1532b7e43d99f88c3014ebe579b3ccfb6b2956376189089ec99b88bfd72c82be",
+  "fixturesSha256": "8ad5d7f71d0db5e41b84069b2497c14877b89d83019c1d44d812f2683a9c6605",
+  "files": {
+    "ycs/data-contract.cjs": "1971da986a81626c3408c6f14dfdc2393a4c27eefeeeb331cabe2b09f0d16a53",
+    "ycs/public/data-contract.js": "3045e43f185b8103d2b708707d0851b6deb77ee665606531bfda87a212c4f6b2"
+  }
+}

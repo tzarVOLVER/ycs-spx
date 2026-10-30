@@ -807,16 +807,17 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(cors());
-app.use(session({
+const spxSession = session({
   secret: 'salainenSalaisuus#007',
   resave: false,
   saveUninitialized: false
-}));
+});
+app.use(spxSession);
 
 global.user = "";
 
 // Optional YCS stage routing, registered before the legacy shared playout routes.
-require('./ycs/index.cjs')(app, config);
+const ycsPlayback = require('./ycs/index.cjs')(app, config);
 
 // Router files
 const ROUTEfiles = require('./routes/routes-api.js');
@@ -919,6 +920,10 @@ var server = app.listen(port, config.ycs?.listenHost, (err) => {
 });
 
 global.io = require('socket.io')(server);
+if (ycsPlayback) {
+  io.engine.use(spxSession);
+  ycsPlayback.attachSockets(io);
+}
 var clients = {}
 
 io.sockets.on('connection', function (socket) {

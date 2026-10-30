@@ -12,7 +12,7 @@ async function once(file, value) {
 }
 
 async function setup() {
-  await fs.access(path.join(graphicsRoot, 'YCS-Ticker-1.html'));
+  await fs.access(path.join(graphicsRoot, 'ticker.html'));
   for (const folder of ['.local/LOG', '.local/DATAROOT', 'ASSETS/csv', 'ASSETS/media/images/hd', 'ASSETS/plugins']) await fs.mkdir(path.join(root, folder), { recursive: true });
   const stages = [];
   for (let number = 1; number <= 3; number++) {
@@ -20,9 +20,9 @@ async function setup() {
     stages.push(stage);
     const folder = path.join(root, '.local/DATAROOT', stage.project);
     await fs.mkdir(path.join(folder, 'data'), { recursive: true });
-    const html = await fs.readFile(path.join(graphicsRoot, `YCS-Ticker-${number}.html`), 'utf8');
+    const html = await fs.readFile(path.join(graphicsRoot, 'ticker.html'), 'utf8');
     const definition = JSON.parse(html.match(/window\.SPXGCTemplateDefinition = (\{[\s\S]*?\});/)[1]);
-    Object.assign(definition, { relpath: `/ycs/ticker/YCS-Ticker-${number}.html`, itemID: 'ticker', ycsSlot: 'ticker', webplayout: '1', playlayer: '1', onair: 'false' });
+    Object.assign(definition, { relpath: '/ycs/ticker/ticker.html', itemID: 'ticker', ycsSlot: 'ticker', webplayout: '1', playlayer: '1', onair: 'false' });
     const lower = {
       description: `Stage ${number} lower third — test`, relpath: '/ycs-system/LowerThird.html', itemID: 'lower-third', ycsSlot: 'lower-third',
       playserver: 'OVERLAY', playchannel: '1', playlayer: '2', webplayout: '2', steps: '1', out: 'manual', uicolor: '3', dataformat: 'json', onair: 'false',

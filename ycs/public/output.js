@@ -1,115 +1,331 @@
-// Dynamic per-output compositor. SPX HTML lifecycle is retained in each iframe.
+// Per-slot output workers preserve committed frames while replacements load.
 const [, , stage, mode] = location.pathname.split('/');
 const root = document.getElementById('composition');
-const frames = new Map();
-const retired = new Set();
-let pending;
-let running = false;
-let disposed = false;
-let revision = -1;
+const frames = new Map(),
+  jobs = new Map(),
+  provisional = new Set(),
+  retired = new Set();
+const retryDelays = [250, 1000, 3000];
+let disposed = false,
+  revision = -1,
+  latest,
+  epoch = 0;
+let renderedRevision = -1,
+  renderingError = '',
+  connectionError = '';
+const rendererId =
+  typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+        byte.toString(16).padStart(2, '0')
+      ).join('');
 document.documentElement.dataset.stage = stage;
 document.documentElement.dataset.mode = mode;
-
-function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-function timed(promise, milliseconds) {
-  let timer;
-  return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Template lifecycle timed out')), milliseconds); })]).finally(() => clearTimeout(timer));
+async function report(state = renderingError ? 'error' : 'ready', keepalive = false) {
+  try {
+    await fetch(`/api/ycs/stages/${stage}/${mode}/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      keepalive,
+      body: JSON.stringify({
+        id: rendererId,
+        state,
+        revision: renderedRevision,
+        message: renderingError.slice(0, 300)
+      })
+    });
+  } catch {
+    /* Missed heartbeats are detected on the server. */
+  }
 }
-async function invoke(entry, method, ...args) {
-  const callback = entry.frame.contentWindow[method];
+const keyOf = (graphic) => JSON.stringify(graphic || null);
+const sameTemplate = (a, b) => a && b && a.id === b.id && a.template === b.template;
+const superseded = () => new DOMException('Output operation superseded', 'AbortError');
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function bounded(promise, milliseconds = 8000, signal) {
+  let timer, abort;
+  const limit = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('Template lifecycle timed out')), milliseconds);
+    abort = () => reject(superseded());
+    if (signal?.aborted) abort();
+    else signal?.addEventListener('abort', abort, { once: true });
+  });
+  return Promise.race([promise, limit]).finally(() => {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  });
+}
+async function invoke(entry, method, args = [], signal) {
+  if (signal?.aborted || disposed) throw superseded();
+  const callback = entry.frame.contentWindow?.[method];
   if (typeof callback !== 'function') throw new Error(`Template has no ${method} lifecycle`);
-  await timed(Promise.resolve(callback.apply(entry.frame.contentWindow, args)), 8000);
+  await bounded(Promise.resolve(callback.apply(entry.frame.contentWindow, args)), 8000, signal);
+  if (signal?.aborted || disposed) throw superseded();
 }
-async function mount(graphic) {
+async function mount(graphic, signal) {
   const frame = document.createElement('iframe');
   frame.className = 'graphic';
   frame.dataset.graphic = graphic.id;
   frame.dataset.slot = graphic.slot;
   frame.style.zIndex = graphic.z;
+  frame.style.visibility = 'hidden';
   frame.title = `${stage} ${mode} ${graphic.id}`;
-  const loaded = new Promise((resolve, reject) => { frame.onload = resolve; frame.onerror = reject; });
+  const loaded = new Promise((resolve, reject) => {
+    frame.onload = resolve;
+    frame.onerror = reject;
+  });
   const url = new URL(graphic.template, location.origin);
   url.searchParams.set('ycsStage', stage);
   url.searchParams.set('ycsMode', mode);
   frame.src = url;
   const entry = { frame, graphic, continuation: graphic.continuation || 0 };
+  const remove = () => frame.remove();
+  provisional.add(entry);
+  signal.addEventListener('abort', remove, { once: true });
   root.append(frame);
   try {
-    await timed(loaded, 8000);
-    await invoke(entry, 'update', JSON.stringify(graphic.data));
-    await invoke(entry, 'play');
+    await bounded(loaded, 8000, signal);
+    await invoke(entry, 'update', [JSON.stringify(graphic.data)], signal);
+    if (signal.aborted || disposed) throw superseded();
+    frame.style.visibility = '';
+    await invoke(entry, 'play', [], signal);
     entry.data = JSON.stringify(graphic.data);
     return entry;
-  } catch (error) { frame.remove(); throw error; }
+  } catch (error) {
+    frame.remove();
+    throw error;
+  } finally {
+    provisional.delete(entry);
+    signal.removeEventListener('abort', remove);
+  }
 }
 async function retire(entry) {
+  if (retired.has(entry)) return;
   retired.add(entry);
+  const controller = new AbortController();
+  entry.retireController = controller;
   try {
-    await invoke(entry, 'stop');
-    await delay(Math.min(entry.graphic.exitMs || 250, 2000));
-  } catch (error) { console.warn('[YCS output]', error.message); }
-  finally { entry.frame.remove(); retired.delete(entry); }
-}
-async function reconcile(snapshot) {
-  const wanted = new Map(snapshot.graphics.map(graphic => [graphic.slot, graphic]));
-  const outgoing = [];
-  for (const [slot, entry] of frames) {
-    const graphic = wanted.get(slot);
-    if (!graphic) {
-      frames.delete(slot);
-      outgoing.push(retire(entry));
-    }
+    await bounded(
+      invoke(entry, 'stop', [], controller.signal).then(() =>
+        delay(Math.min(entry.graphic.exitMs ?? 250, 2000))
+      ),
+      2000
+    );
+  } catch (error) {
+    if (!disposed) console.warn('[YCS output]', error.message);
+  } finally {
+    controller.abort();
+    entry.frame.remove();
+    retired.delete(entry);
   }
-  // Retirement can animate while unrelated slots remain untouched.
-  for (const graphic of snapshot.graphics) {
-    let entry = frames.get(graphic.slot);
-    if (!entry || graphic.id !== entry.graphic.id || graphic.template !== entry.graphic.template) {
-      // Keep the previous graphic until the replacement has loaded successfully.
-      const replacement = await mount(graphic);
-      frames.set(graphic.slot, replacement);
-      if (entry) outgoing.push(retire(entry));
-      entry = replacement;
-    } else {
-      const data = JSON.stringify(graphic.data);
-      if (entry.data !== data) { await invoke(entry, 'update', JSON.stringify(graphic.data)); entry.data = data; }
-      if ((graphic.continuation || 0) !== entry.continuation) {
-        await invoke(entry, 'next');
-        entry.continuation = graphic.continuation || 0;
+}
+function health() {
+  if (disposed || !latest) return;
+  const errors = [...jobs.values()]
+    .filter((job) => job.error)
+    .map((job) => job.slot + ': ' + job.error);
+  renderingError = connectionError || errors.join('; ');
+  root.dataset.error = renderingError;
+  const complete = [...jobs.values()].every(
+    (job) => !job.running && !job.error && job.applied === job.key
+  );
+  if (complete) {
+    renderedRevision = latest.revision;
+    root.dataset.revision = latest.revision;
+  }
+  report();
+}
+async function apply(job, graphic, signal) {
+  let entry = frames.get(job.slot);
+  if (!graphic) {
+    if (entry) {
+      frames.delete(job.slot);
+      await bounded(retire(entry), 2500, signal);
+    }
+    return;
+  }
+  if (!sameTemplate(entry?.graphic, graphic)) {
+    const replacement = await mount(graphic, signal);
+    if (signal.aborted || disposed) {
+      replacement.frame.remove();
+      throw superseded();
+    }
+    frames.set(job.slot, replacement);
+    if (entry) await bounded(retire(entry), 2500, signal);
+    return;
+  }
+  const data = JSON.stringify(graphic.data);
+  if (entry.data !== data) {
+    await invoke(entry, 'update', [data], signal);
+    entry.data = data;
+  }
+  if ((graphic.continuation || 0) !== entry.continuation) {
+    await invoke(entry, 'next', [], signal);
+    entry.continuation = graphic.continuation || 0;
+  }
+  entry.graphic = graphic;
+}
+function kick(job) {
+  if (disposed || !latest || job.running || job.timer || (job.applied === job.key && !job.error))
+    return;
+  const key = job.key,
+    graphic = job.goal,
+    generation = epoch;
+  const controller = new AbortController();
+  job.running = true;
+  job.controller = controller;
+  apply(job, graphic, controller.signal)
+    .then(() => {
+      if (controller.signal.aborted || disposed || generation !== epoch) return;
+      job.applied = key;
+      job.error = '';
+      job.failures = 0;
+    })
+    .catch((error) => {
+      if (error.name === 'AbortError' || disposed || generation !== epoch || job.key !== key)
+        return;
+      job.error = error.message;
+      console.error('[YCS output]', job.slot, error);
+      if (job.failures < retryDelays.length) {
+        job.timer = setTimeout(() => {
+          job.timer = null;
+          kick(job);
+        }, retryDelays[job.failures++]);
       }
-      entry.graphic = graphic;
-    }
-  }
-  await Promise.all(outgoing);
-  root.dataset.revision = snapshot.revision;
-  root.dataset.error = '';
+    })
+    .finally(() => {
+      job.running = false;
+      job.controller = null;
+      if (disposed) return;
+      health();
+      if (job.key !== key || generation !== epoch) kick(job);
+    });
 }
-async function drain() {
-  if (running || disposed) return;
-  running = true;
-  while (pending && !disposed) {
-    const snapshot = pending;
-    pending = null;
-    try { await reconcile(snapshot); }
-    catch (error) {
-      root.dataset.error = error.message;
-      console.error('[YCS output]', error);
-      // A failed template does not terminate this output's subscription.
-    }
-  }
-  running = false;
-}
-const events = new EventSource(`/api/ycs/stages/${stage}/${mode}/events`);
-events.addEventListener('state', event => {
-  const snapshot = JSON.parse(event.data);
-  if (snapshot.stage !== stage || snapshot.mode !== mode || snapshot.revision < revision) return;
-  revision = snapshot.revision;
-  pending = snapshot;
-  document.documentElement.dataset.connection = 'connected';
-  drain();
+const events = io('/ycs-playback', {
+  transports: ['websocket'],
+  forceNew: true,
+  auth: { viewer: true, stage, mode }
 });
-events.onerror = () => { document.documentElement.dataset.connection = 'reconnecting'; };
-window.addEventListener('pagehide', () => {
-  disposed = true;
-  events.close();
-  for (const entry of [...frames.values(), ...retired]) entry.frame.remove();
-}, { once: true });
+events.on('connect', () => {
+  epoch++;
+  revision = -1;
+  latest = null;
+  for (const job of jobs.values()) {
+    job.controller?.abort();
+    clearTimeout(job.timer);
+    job.timer = null;
+  }
+  events.emit('subscribe', { stage, modes: [mode] });
+});
+events.on('state', (snapshot) => {
+  if (
+    disposed ||
+    snapshot.stage !== stage ||
+    snapshot.mode !== mode ||
+    snapshot.revision < revision
+  )
+    return;
+  revision = snapshot.revision;
+  latest = snapshot;
+  connectionError = '';
+  document.documentElement.dataset.connection = 'connected';
+  const wanted = new Map(snapshot.graphics.map((graphic) => [graphic.slot, graphic]));
+  for (const slot of new Set([...jobs.keys(), ...wanted.keys()])) {
+    let job = jobs.get(slot);
+    if (!job) {
+      job = { slot, applied: keyOf(null), failures: 0, error: '' };
+      jobs.set(slot, job);
+    }
+    const goal = wanted.get(slot) || null,
+      key = keyOf(goal);
+    if (key !== job.key) {
+      // Keep active data updates serial. Pending mounts and removed/replaced
+      // identities are cancellable so Stop never waits for a stale Play.
+      if (!sameTemplate(frames.get(slot)?.graphic, goal)) job.controller?.abort();
+      clearTimeout(job.timer);
+      job.timer = null;
+      job.failures = 0;
+      job.error = '';
+      job.goal = goal;
+      job.key = key;
+    } else if (job.error) {
+      clearTimeout(job.timer);
+      job.timer = null;
+      job.failures = 0;
+    }
+    kick(job);
+  }
+  health();
+});
+function disconnected() {
+  if (disposed) return;
+  document.documentElement.dataset.connection = 'reconnecting';
+  connectionError = 'Output connection lost; retaining current graphics';
+  renderingError = connectionError;
+  report();
+}
+let renewing = false,
+  lastRenewal = 0,
+  renewalTimer = null;
+function scheduleRenewal() {
+  if (disposed || events.connected || renewing || renewalTimer !== null) return;
+  renewalTimer = setTimeout(renewViewerSession, Math.max(0, lastRenewal + 5000 - Date.now()));
+}
+async function renewViewerSession() {
+  renewalTimer = null;
+  if (disposed || events.connected) return;
+  renewing = true;
+  lastRenewal = Date.now();
+  try {
+    // Server restarts lose in-memory sessions. Refresh only this output's
+    // grant, then reconnect even after a namespace auth error (not retried by Socket.IO).
+    const response = await fetch(location.pathname, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(3000)
+    });
+    if (!disposed && response.ok) {
+      events.disconnect(); // Reopen the transport with the renewed session cookie.
+      events.connect?.();
+    }
+  } catch {
+    /* Retry only this read-only output authorization route. */
+  } finally {
+    renewing = false;
+    scheduleRenewal();
+  }
+}
+events.on('disconnect', disconnected);
+events.on('connect_error', () => {
+  disconnected();
+  scheduleRenewal();
+});
+events.on('stage-error', (error) => {
+  renderingError = error.error;
+  report();
+});
+const healthTimer = setInterval(() => report(), 5000);
+window.addEventListener(
+  'pagehide',
+  () => {
+    disposed = true;
+    clearInterval(healthTimer);
+    clearTimeout(renewalTimer);
+    for (const job of jobs.values()) {
+      job.controller?.abort();
+      clearTimeout(job.timer);
+    }
+    report('closed', true);
+    try {
+      events.disconnect();
+    } catch {
+      /* Transport may already be closed. */
+    }
+    for (const entry of [...frames.values(), ...provisional, ...retired]) {
+      entry.retireController?.abort();
+      entry.frame.remove();
+    }
+  },
+  { once: true }
+);

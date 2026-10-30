@@ -176,7 +176,11 @@ router.get('/config', cors(), spxAuth.CheckLogin, async (req, res) => {
 
 router.post('/config', spxAuth.CheckLogin, async (req, res) => {
 	// save incoming json form data to config.json and reload the page
-	let ConfigData = req.body;
+	let ConfigData = { ...req.body };
+	// The stock form does not own YCS settings. Preserve them server-side,
+	// including when a client submits an unexpected ycs field.
+	if (Object.hasOwn(config, 'ycs')) ConfigData.ycs = structuredClone(config.ycs);
+	else delete ConfigData.ycs;
 	if (req.body.NewName && req.body.NewHost && req.body.NewPort) {
 		// new server was added
 		var obj = {};
@@ -235,10 +239,10 @@ router.post('/config', spxAuth.CheckLogin, async (req, res) => {
 			res.render('view-appconfig', { recents: ConfigData.general.recents, layout: false, config: config, message: 'Changes saved', user: req.session.user });
 		};
 		// -----------------------------------------------------------------------------
-		saveAndReadConfig(); // a nice solution 
+		await saveAndReadConfig();
 	} catch (error) {
 		logger.error('router.post/config - Error while saving file: ', error);
-		res.render('view-appconfig', { recents: ConfigData.general.recents, layout: false, config: config, error: 'Error saving config: ' + err, user: req.session.user });
+		res.render('view-appconfig', { recents: ConfigData.general.recents, layout: false, config: config, error: 'Error saving config', user: req.session.user });
 	}; //file written
 
 
