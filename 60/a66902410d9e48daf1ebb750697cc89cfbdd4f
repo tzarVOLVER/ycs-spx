@@ -1,0 +1,21 @@
+YCS.md
+  s_d6e0e2bbf1a790::t_7b203ee482829d 69,136,144,187,219-221,350,376
+utils/config-store.cjs
+  s_d6e0e2bbf1a790::t_8f969ccc69db51 116-117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "60a66902410d9e48daf1ebb750697cc89cfbdd4f",
+  "prompts": {},
+  "sessions": {
+    "s_d6e0e2bbf1a790": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ee28f753-bfdc-4d88-a368-4007cea0e1ca",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Brandon Ly <git@brndn.ly>"
+    }
+  }
+}
