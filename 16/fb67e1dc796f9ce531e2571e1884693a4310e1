@@ -1,0 +1,25 @@
+ycs/tests/local-files.test.cjs
+  s_16707d2802f5c5::t_acbf21009c9a4a 95-99
+ycs/tests/local-file-writes.test.cjs
+  s_16707d2802f5c5::t_c08efdbd33cadc 1-114
+ycs/local-files.cjs
+  s_16707d2802f5c5::t_9267060894f41b 8-9,15-22,155-158,162-163,251-253,265,271,308-314,318,353
+  s_16707d2802f5c5::t_28fbe2f74999f1 263
+  s_16707d2802f5c5::t_62306a02bf6ad5 315-317
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "16fb67e1dc796f9ce531e2571e1884693a4310e1",
+  "prompts": {},
+  "sessions": {
+    "s_16707d2802f5c5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3065b94a-99f0-4103-96a7-f160c812b186",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Brandon Ly <git@brndn.ly>"
+    }
+  }
+}
