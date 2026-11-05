@@ -30,10 +30,15 @@ function button(title, callback) {
   );
   return result;
 }
+let messageTimer;
+// Confirmations clear themselves; errors stay until dismissed or replaced.
 function message(text, error = false) {
+  clearTimeout(messageTimer);
   $('message').textContent = text;
   $('message').classList.toggle('error', error);
+  if (text && !error) messageTimer = setTimeout(() => message(''), 5000);
 }
+$('dismiss-message').onclick = () => message('');
 async function request(url, body) {
   const response = await fetch(
     '/api/ycs' + url,
@@ -79,10 +84,13 @@ function renderConnections() {
           ? 'Connected'
           : connection.health === 'loading'
             ? 'Connecting'
-            : 'Needs attention',
+            : connection.health === 'error'
+              ? 'Read failed'
+              : 'Needs attention',
         'status'
       );
     badge.classList.toggle('warning', connection.health !== 'ok');
+    badge.classList.toggle('error', connection.health === 'error');
     top.append(node('h3', connection.label), badge);
     const actions = node('div', undefined, 'connection-actions');
     actions.append(
@@ -98,6 +106,7 @@ function renderConnections() {
       renderConnections();
       message('Connection removed.');
     });
+    remove.classList.add('danger');
     remove.disabled = connection.usages.length > 0;
     remove.title = remove.disabled
       ? 'Remove its field mappings and stop linked on-air graphics first'
@@ -117,7 +126,7 @@ function renderConnections() {
         node(
           'p',
           (connection.error || connection.warning) + ' · Holding last valid values.',
-          'warning'
+          connection.error ? 'source-alert error' : 'source-alert warning'
         )
       );
     const details = node('details');
@@ -373,9 +382,15 @@ async function poll() {
   loading = true;
   try {
     state = await request('/data');
-    $('health').textContent =
-      state.health === 'ok' ? 'Background sync active' : 'Data needs attention';
-    $('health').classList.toggle('warning', state.health !== 'ok');
+    const failing = Object.values(state.connections || {}).filter(
+      (connection) => connection.health === 'error'
+    ).length;
+    $('health').textContent = failing
+      ? `${failing} source${failing === 1 ? '' : 's'} failing`
+      : state.health === 'ok'
+        ? 'All sources OK'
+        : 'Data needs attention';
+    $('health').classList.toggle('warning', failing > 0 || state.health !== 'ok');
     if (
       !document.querySelector('#connections details[open]') &&
       !document.activeElement?.closest('#connections')
@@ -414,6 +429,7 @@ window.addEventListener(
   'pagehide',
   () => {
     disposed = true;
+    clearTimeout(messageTimer);
     sheetPicker.dispose();
     localFile.dispose();
     workspace.dispose();
