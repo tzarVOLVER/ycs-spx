@@ -1,0 +1,25 @@
+ycs/output-access.cjs
+  s_aae51de1b1b3c2::t_99abd66bf5e1ce 17-18,20-22,24,26
+ycs/tests/output-access.test.cjs
+  s_aae51de1b1b3c2::t_fbafbb6bf954a6 26,70-80,83,87,123,132-134,145-146,159-167
+ycs/sockets.cjs
+  s_aae51de1b1b3c2::t_99abd66bf5e1ce 5,12-14,20
+ycs/index.cjs
+  s_aae51de1b1b3c2::t_99abd66bf5e1ce 14-17,52,93,133,395,499
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e971011ceeee507a209d69265b1f1830990fb472",
+  "prompts": {},
+  "sessions": {
+    "s_aae51de1b1b3c2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9639c007-7920-48b1-a1a9-3e7f6aa5e671",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Brandon Ly <git@brndn.ly>"
+    }
+  }
+}
