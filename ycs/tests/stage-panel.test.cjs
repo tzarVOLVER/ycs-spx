@@ -51,13 +51,19 @@ test('monitor selection preserves the native renderer, labels its mode and never
     'false'
   );
   assert.equal(document.getElementById('previewIF'), frame);
+  assert.equal(r.element.querySelector('[data-output="program"] .ycs-output-tally').textContent, 'Clear');
   r.controller.setProgram({ graphics: [{ id: 'ticker' }] });
   assert.equal(
     r.element.querySelector('[data-output="program"]').classList.contains('is-active'),
     true
   );
+  assert.equal(r.element.querySelector('[data-output="program"] .ycs-output-tally').textContent, '1 on air');
+  assert.equal(document.querySelector('.ycs-monitor-tally').textContent, '1 on air');
+  assert.equal(document.querySelector('.ycs-monitor-shell').dataset.onAir, 'true');
   r.controller.setConnected(false);
   assert.equal(r.element.querySelector('.ycs-connection-status').hidden, false);
+  assert.equal(document.querySelector('.ycs-monitor-tally').textContent, 'Unconfirmed');
+  assert.equal(document.documentElement.dataset.ycsConnection, 'lost');
   r.controller.setPreview({ selected: 'ticker' });
   assert.equal(r.element.querySelector('.ycs-connection-status').hidden, true);
   assert.match(r.element.querySelector('[data-monitor="preview"]').title, /ticker draft/);
