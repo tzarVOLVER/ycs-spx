@@ -427,7 +427,7 @@ if (stage) {
       try {
         const response = await fetch(location.pathname, { cache: 'no-store', signal: AbortSignal.timeout(3000) });
         const final = response.url ? new URL(response.url, location.href).pathname : location.pathname;
-        if (response.redirected || final !== location.pathname) stagePanel.setConnected(false, 'Signed out. Reload to sign in.');
+        if (response.redirected || final !== location.pathname) stagePanel.setConnected(false, 'Controller signed out · Reload to sign in');
         else if (!disposed && response.ok) stageEvents.connect();
       } catch { /* Server still down; try again. */ }
       reconnectLater();
