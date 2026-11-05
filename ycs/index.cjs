@@ -154,9 +154,19 @@ module.exports = function registerYCS(app, config, hooks = {}) {
     '/data',
     handlers(async (req, res) => {
       await sources.ready;
-      const snapshot = sources.snapshot();
-      // Controllers and Data Manager poll this every few seconds. Serve labels
-      // from the parsed-file cache; a stalled share only delays its own refresh.
+      // Serve labels from the parsed-file cache; a stalled share only delays its own refresh.
+      // Pollers send the dataset hashes they hold (`have=id:hash,…`) or ask for no
+      // datasets at all; unchanged rows/data are then left out of the response.
+      let datasets = 'all';
+      if (req.query.datasets === 'none') datasets = 'none';
+      else if (typeof req.query.have === 'string' && req.query.have.length <= 16384)
+        datasets = new Map(
+          req.query.have
+            .split(',')
+            .map((item) => item.split(':'))
+            .filter((pair) => pair.length === 2)
+        );
+      const snapshot = sources.snapshot({ datasets });
       const inventories = new Map();
       await Promise.all([...repository.stages.values()].map(async stage => {
         const { rundown, profile } = await repository.inventory(stage.id);
