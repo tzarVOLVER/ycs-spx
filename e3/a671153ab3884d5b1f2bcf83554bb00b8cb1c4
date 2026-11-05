@@ -1,0 +1,31 @@
+ycs/tests/controller.test.cjs
+  s_9418e5eab7ce0f::t_39b48b0b627090 566-574,576-581
+  s_9418e5eab7ce0f::t_f745c3ac90b0a6 575
+ycs/public/controller.js
+  s_9418e5eab7ce0f::t_be1e5490bd0369 8,423
+ycs/public/stage-panel.js
+  s_9418e5eab7ce0f::t_be1e5490bd0369 4,7,33,71-74,184-190,192
+  s_9418e5eab7ce0f::t_f745c3ac90b0a6 191
+  s_9418e5eab7ce0f::t_f85ef7f0e1be49 193
+ycs/public/controller.css
+  s_9418e5eab7ce0f::t_be1e5490bd0369 43
+ycs/tests/stage-panel.test.cjs
+  s_9418e5eab7ce0f::t_a75c4f5bf3d4e0 152-161,163,165-172
+  s_9418e5eab7ce0f::t_f745c3ac90b0a6 162,164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e3a671153ab3884d5b1f2bcf83554bb00b8cb1c4",
+  "prompts": {},
+  "sessions": {
+    "s_9418e5eab7ce0f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f4ec352b-8f14-404c-b52f-f77f714d11fb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Brandon Ly <git@brndn.ly>"
+    }
+  }
+}
