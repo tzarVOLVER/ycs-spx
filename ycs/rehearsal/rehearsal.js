@@ -43,12 +43,12 @@ async function liveRound(stage, value) {
 }
 for (const [index, stage] of stages.entries()) {
   const card = document.createElement('article'); card.className = 'stage'; card.dataset.stage = stage;
-  card.innerHTML = `<header><h2>Stage ${index + 1}</h2><a href="/output/${stage}/program" target="_blank" rel="noopener">Open output ↗</a></header>
+  card.innerHTML = `<header><h2>Stage ${index + 1}</h2><span class="tally">Clear</span><a href="/output/${stage}/program" target="_blank" rel="noopener">Open output ↗</a></header>
     <div class="monitor"><iframe title="Stage ${index + 1} rehearsal output" src="/output/${stage}/program"></iframe></div>
     <div class="stage-content"><div class="state" role="status">Connecting…</div><div class="source">Stories: ${index === 0 ? 'simulated Sheet range' : 'simulated JSON array'}</div>
     <div class="actions"><button data-graphic="ticker" data-action="play">Play ticker</button><button data-graphic="ticker" data-action="stop">Stop ticker</button><button data-graphic="lower-third" data-action="play">Play lower third</button><button data-graphic="lower-third" data-action="stop">Stop lower third</button></div>
     <label>Linked round value<div class="input-row"><input aria-label="Stage ${index + 1} linked round" value="SWISS ROUND ${index + 1} OF 15"><button data-live>Send live</button></div></label>
-    <div class="actions"><button data-reload>Reload output</button><button data-drop>Test reconnect</button><button data-clear>Stop stage</button></div><small>Test controls affect this disposable rehearsal only.</small></div>`;
+    <div class="actions"><button data-reload>Reload output</button><button data-drop>Test reconnect</button><button data-clear class="danger">Stop stage</button></div><small>Test controls affect this disposable rehearsal only.</small></div>`;
   document.querySelector('#stages').append(card); cards.set(stage, card);
   const monitor = card.querySelector('.monitor'), frame = card.querySelector('iframe');
   new ResizeObserver(() => { frame.style.transform = `scale(${monitor.clientWidth / 1920})`; }).observe(monitor);
@@ -64,6 +64,13 @@ for (const [index, stage] of stages.entries()) {
     });
   });
 }
+// Program tally per stage card: red on air, grey while state is unconfirmed.
+function paintTally(stage, text, state, failed) {
+  const card = cards.get(stage), tally = card.querySelector('.tally');
+  if (tally.textContent !== text) tally.textContent = text;
+  card.dataset.tally = state;
+  card.querySelector('.state').classList.toggle('fail', failed);
+}
 async function refresh() {
   await Promise.all(stages.map(async stage => {
     const target = cards.get(stage).querySelector('.state');
@@ -71,7 +78,8 @@ async function refresh() {
       const [snapshot, health] = await Promise.all([state(stage), request(`/api/ycs/stages/${stage}/health`)]);
       const round = ticker(snapshot)?.data.f5;
       target.textContent = `${snapshot.graphics.length ? snapshot.graphics.map(item => item.slot).join(' + ') : 'Stopped'}${round ? ' · ' + round : ''} · ${health.program.errors.length ? health.program.errors.join('; ') : health.program.ready ? 'Output ready' : 'Waiting for renderer'}`;
-    } catch { target.textContent = 'Reconnecting · retaining current graphics until server state returns'; }
+      paintTally(stage, snapshot.graphics.length ? snapshot.graphics.length + ' on air' : 'Clear', snapshot.graphics.length ? 'on-air' : 'clear', health.program.errors.length > 0);
+    } catch { target.textContent = 'Reconnecting · retaining current graphics until server state returns'; paintTally(stage, 'Unconfirmed', 'unknown', false); }
   }));
 }
 document.querySelector('#clear').addEventListener('click', () => task(async () => {
