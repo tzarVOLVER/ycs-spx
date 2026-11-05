@@ -1,0 +1,19 @@
+ycs/tests/data-cache.test.cjs
+  s_18fd38818aa8e7::t_a780777e67a80c 160-162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7aa37bf5c667a8254fceefe4e81487f67cb513ae",
+  "prompts": {},
+  "sessions": {
+    "s_18fd38818aa8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6fe2a98b-f46e-40b1-aaa1-5a6dad62bdb9",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Brandon Ly <git@brndn.ly>"
+    }
+  }
+}
