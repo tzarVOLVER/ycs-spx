@@ -114,6 +114,19 @@ if (stage) {
     routing.addEventListener('keydown',event=>event.stopPropagation());model.slotSelection=slotSelect.value;slotLabel.append(slotSelect);routing.append(slotLabel,warning);return routing;
 
   }
+  // Native item tools are clickable <i> icons. Give each a real, labelled button
+  // that keeps its original id, data-spx-name and inline handler.
+  const toolLabels = [['fa-trash-alt', 'Delete item'], ['fa-clone', 'Duplicate item'], ['fa-file-export', 'Export item as CSV']];
+  function toolButton(icon) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'ycs-tool-button';
+    const label = icon.title || toolLabels.find(([name]) => icon.classList.contains(name))?.[1] || 'Item tool';
+    button.title = label; button.setAttribute('aria-label', label);
+    for (const name of ['id', 'data-spx-name', 'onclick', 'onmouseover', 'onmouseout']) if (icon.hasAttribute(name)) { button.setAttribute(name, icon.getAttribute(name)); icon.removeAttribute(name); }
+    for (const name of ['disabled', 'HIDE', 'hide', 'hidden']) if (icon.classList.contains(name)) button.classList.add(name);
+    button.hidden = icon.hidden; button.style.cssText = icon.style.cssText; icon.removeAttribute('style'); icon.hidden = false;
+    icon.removeAttribute('title'); icon.setAttribute('aria-hidden', 'true'); button.append(icon);
+    return button;
+  }
   function organize(row, editor, model) {
     const cell = row.querySelector('#Expanded td[width="65%"]');
     const supported = ['hidden', 'textfield', 'checkbox', 'number', 'filelist', 'textarea', 'dropdown', 'caption', 'instruction', 'spacer'];
@@ -171,7 +184,7 @@ if (stage) {
       for(const field of section.fields){destinations.set(field,container);assigned.add(field);}
     }
     const badge = document.createElement('span'); badge.className = 'ycs-pending'; badge.hidden = true; model.badge = badge;
-    const manager = document.createElement('a'); manager.href = `/ycs/data-manager?stage=${stage}&graphic=${encodeURIComponent(row.dataset.spxEpoch)}`; manager.className = 'ycs-field-mappings'; manager.textContent = 'Manage field mappings ↗';
+    const manager = document.createElement('a'); manager.href = `/ycs/data-manager?stage=${stage}&graphic=${encodeURIComponent(row.dataset.spxEpoch)}`; manager.className = 'ycs-field-mappings'; manager.textContent = 'Manage field mappings';
     cell.append(content, manager, badge);
     for (const field of editor.fields) {
       const input = original.querySelector(`[data-update="${field.field}"]`); if (!input || field.ftype === 'hidden') continue;
@@ -186,7 +199,9 @@ if (stage) {
     const save = row.querySelector('button[onclick*="saveTemplateItemChangesByElement"]'); if (save) { save.textContent = 'Save draft'; save.title = 'Save without changing program'; }
     const update = row.querySelector('[data-spx-name="updatebutton"]'); if (update) { update.textContent = 'Update on air'; update.title = 'Apply this draft and its field links to program'; }
     const siblingCells=[...cell.parentElement.children].filter(sibling=>sibling!==cell),nativeActions=siblingCells.flatMap(sibling=>[...sibling.querySelectorAll('button,.l-icon')]);
-    if(nativeActions.length){const footer=document.createElement('div');footer.className='ycs-editor-footer';const actions=document.createElement('div');actions.className='ycs-editor-actions';const tools=document.createElement('div');tools.className='ycs-editor-tools';for(const action of [...nativeActions,...folderTools])(action.tagName==='BUTTON'?actions:tools).append(action);footer.append(manager,actions,tools);cell.append(footer);for(const sibling of siblingCells)sibling.hidden=true;cell.colSpan=siblingCells.length+1;cell.setAttribute('width','100%');}
+    if(nativeActions.length){const footer=document.createElement('div');footer.className='ycs-editor-footer';const actions=document.createElement('div');actions.className='ycs-editor-actions';const tools=document.createElement('div');tools.className='ycs-editor-tools';const toolButtons=[];for(const action of [...nativeActions,...folderTools])if(action.tagName==='BUTTON')actions.append(action);else toolButtons.push(toolButton(action));
+      // Delete goes last, apart from the other tools, so it is not hit on the way to Duplicate.
+      toolButtons.sort((a,b)=>(a.dataset.spxName==='deletelarge')-(b.dataset.spxName==='deletelarge'));tools.append(...toolButtons);footer.append(manager,actions,tools);cell.append(footer);for(const sibling of siblingCells)sibling.hidden=true;cell.colSpan=siblingCells.length+1;cell.setAttribute('width','100%');}
   }
   function initialize(row) {
     const id = row.dataset.spxEpoch, model = { links: {}, widgets: {}, revision: 0, queue: Promise.resolve() }; models.set(id, model);
@@ -243,7 +258,7 @@ if (stage) {
       if (validationRow === row && !['stop', 'continue'].includes(action)) { notify(''); validationRow = null; }
       if (action !== 'preview') {
         if (['play', 'update', 'save'].includes(action)) model.revision = result.editorRevision;
-        notify(action === 'save' ? 'Saved. Program unchanged.' : `${row.dataset.spxEpoch}: ${action}`);
+        notify(action === 'save' ? 'Saved. Program unchanged.' : commandMessage(row, action));
         if (['play', 'update', 'save'].includes(action)) { row.dataset.spxChanged = 'false'; pending(row, model); }
         if (action === 'save') {
           model.summaryLinks = structuredClone(model.links);
@@ -259,6 +274,10 @@ if (stage) {
     });
     model.queue = operation.catch(error => { if (action === 'preview') row.dataset.spxPreviewing = 'false'; validationRow = error.fields ? row : null; fieldErrors(row, error.fields); notify(error.message, true); });
     return model.queue;
+  }
+  function commandMessage(row, action) {
+    const name = row.querySelector('[data-ycs-item-title]')?.textContent.trim() || row.dataset.spxEpoch;
+    return name + ({ play: ' on air.', stop: ' stopped.', update: ' updated on air.', continue: ' continued.' }[action] || ': ' + action);
   }
   function schedulePreview(row) { clearTimeout(timers.get(row)); if (models.get(row.dataset.spxEpoch)?.previewOnEdit === false) return; timers.set(row, setTimeout(() => send(row, 'preview', true), 300)); }
   for (const row of document.querySelectorAll('.itemrow')) initialize(row);
@@ -408,7 +427,7 @@ if (stage) {
       try {
         const response = await fetch(location.pathname, { cache: 'no-store', signal: AbortSignal.timeout(3000) });
         const final = response.url ? new URL(response.url, location.href).pathname : location.pathname;
-        if (response.redirected || final !== location.pathname) stagePanel.setConnected(false, 'Controller signed out · Reload to sign in');
+        if (response.redirected || final !== location.pathname) stagePanel.setConnected(false, 'Signed out. Reload to sign in.');
         else if (!disposed && response.ok) stageEvents.connect();
       } catch { /* Server still down; try again. */ }
       reconnectLater();

@@ -20,7 +20,11 @@
       this.count = document.createElement('span'); this.count.className = 'ycs-rundown-count'; this.count.setAttribute('aria-live', 'polite');
       this.bar.append(this.input, this.clear, this.density, this.count);
       this.list.prepend(this.bar);
-      this.empty = document.createElement('div'); this.empty.className = 'ycs-rundown-empty'; this.empty.textContent = 'No matching graphics'; this.empty.hidden = true; this.bar.after(this.empty);
+      this.empty = document.createElement('div'); this.empty.className = 'ycs-rundown-empty'; this.empty.hidden = true;
+      const emptyText = document.createElement('span'); emptyText.textContent = 'No graphics match this search.';
+      const emptyClear = document.createElement('button'); emptyClear.type = 'button'; emptyClear.textContent = 'Clear search';
+      emptyClear.addEventListener('click', () => { this.reset(); this.input.focus(); });
+      this.empty.append(emptyText, emptyClear); this.bar.after(this.empty);
       this.input.addEventListener('input', () => { this.query = this.input.value.trim().toLocaleLowerCase(); this.refresh(); });
       this.clear.addEventListener('click', () => { this.reset(); this.input.focus(); });
       this.density.addEventListener('change', () => { this.setDensity(); try { localStorage.setItem('ycs.rundownDensity', this.density.value); } catch {} });

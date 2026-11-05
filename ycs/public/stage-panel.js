@@ -10,15 +10,18 @@ window.YCSStagePanel = class StagePanel {
     this.element.className = 'ycs-stage-panel';
     this.element.setAttribute('aria-label', this.title + ' controls');
     this.element.innerHTML = `
-      <strong class="ycs-heading"></strong>
-      <span class="ycs-output-label">Output</span>
+      <div class="ycs-panel-heading">
+        <strong class="ycs-heading"></strong>
+        <div class="ycs-connection-status" role="status" hidden></div>
+      </div>
+      <span class="ycs-output-label">Monitor</span>
       <div class="ycs-output-options" role="group" aria-label="Monitor output">
         ${['preview', 'program']
           .map(
             (mode) => `
           <div class="ycs-output-choice" data-output="${mode}">
             <button type="button" class="ycs-output-select" data-monitor="${mode}" aria-pressed="false">
-              <span class="ycs-output-dot" aria-hidden="true"></span>${this.modeTitle(mode)}
+              <span class="ycs-output-dot" aria-hidden="true"></span><span class="ycs-output-name">${this.modeTitle(mode)}</span><span class="ycs-output-tally"></span>
             </button>
             <button type="button" class="ycs-copy-output" data-copy-output="${mode}" aria-label="Copy ${mode} output URL">${this.icon('copy')}</button>
           </div>`
@@ -27,11 +30,10 @@ window.YCSStagePanel = class StagePanel {
       </div>
       <div class="ycs-copy-status" role="status" aria-live="polite"></div>
       <input class="ycs-copy-fallback" aria-label="Output URL to copy" readonly hidden>
-      <div class="ycs-connection-status" role="status" hidden></div>
       <div class="ycs-connection-status ycs-output-health" role="status" hidden></div>
       <div class="ycs-panel-footer">
         <button type="button" class="ycs-clear">${this.icon('stop')}Stop stage</button>
-        <a class="ycs-manager-link" href="/ycs/data-manager">Data Manager ↗</a>
+        <a class="ycs-manager-link" href="/ycs/data-manager">Data Manager</a>
       </div>
       <div class="ycs-command-status" role="status" aria-live="polite"></div>`;
     this.element.querySelector('.ycs-heading').textContent = this.title;
@@ -42,7 +44,8 @@ window.YCSStagePanel = class StagePanel {
     if (background && this.frame && background.contains(this.frame)) {
       this.monitor = document.createElement('div');
       this.monitor.className = 'ycs-monitor-shell';
-      this.monitor.innerHTML = '<div class="ycs-monitor-label"></div>';
+      this.monitor.innerHTML =
+        '<div class="ycs-monitor-header"><div class="ycs-monitor-label"></div><span class="ycs-monitor-tally"></span></div>';
       background.before(this.monitor);
       this.monitor.append(background);
       document.getElementById('previewWidthRuler')?.classList.add('ycs-preview-ruler');
@@ -58,15 +61,20 @@ window.YCSStagePanel = class StagePanel {
     this.element.querySelector('.ycs-clear').addEventListener('click', async () => {
       const button = this.element.querySelector('.ycs-clear');
       button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
       try {
         await this.onStop();
       } catch (error) {
         this.notify(error.message, true);
       } finally {
         button.disabled = false;
+        button.removeAttribute('aria-busy');
       }
     });
+    this.onAir = 0;
+    this.connected = true;
     const current = this.frame?.getAttribute('src');
+    this.paintTally();
     this.selectMonitor(current === this.outputPath('program') ? 'program' : 'preview', false);
   }
   icon(name) {
@@ -106,6 +114,24 @@ window.YCSStagePanel = class StagePanel {
         '<span>' +
         this.modeTitle(mode) +
         '</span>';
+      this.paintTally();
+    }
+  }
+  // Program tally is always shown, including while the monitor shows Preview,
+  // so the operator never has to switch monitors to learn what is on air.
+  paintTally() {
+    const count = this.onAir,
+      text = !this.connected ? 'Unconfirmed' : count ? count + ' on air' : 'Clear';
+    const choice = this.element.querySelector('[data-output="program"]');
+    choice.querySelector('.ycs-output-tally').textContent = text;
+    this.element.dataset.connected = String(this.connected);
+    // Rundown rows keep their last known tally; grey it while it is unconfirmed.
+    document.documentElement.dataset.ycsConnection = this.connected ? 'live' : 'lost';
+    if (this.monitor) {
+      const tally = this.monitor.querySelector('.ycs-monitor-tally');
+      tally.textContent = (this.mode === 'program' ? '' : 'Program · ') + text;
+      this.monitor.dataset.onAir = String(this.connected && count > 0);
+      this.monitor.dataset.connected = String(this.connected);
     }
   }
   copyOutput(mode) {
@@ -149,10 +175,12 @@ window.YCSStagePanel = class StagePanel {
     const active = snapshot.graphics.length > 0;
     const choice = this.element.querySelector('[data-output="program"]');
     choice.classList.toggle('is-active', active);
+    this.onAir = snapshot.graphics.length;
     choice.querySelector('[data-monitor]').title = active
       ? 'Monitor program · ' + snapshot.graphics.length + ' graphics on air'
       : 'Monitor program · No graphics on air';
     this.setConnected(true);
+    this.paintTally();
   }
   setPreview(snapshot) {
     this.element.querySelector('[data-monitor="preview"]').title = snapshot.selected
@@ -160,10 +188,14 @@ window.YCSStagePanel = class StagePanel {
       : 'Monitor preview · Follows program';
     this.setConnected(true);
   }
-  setConnected(connected, text = 'Controller reconnecting · Program state unconfirmed') {
+  setConnected(connected, text = 'Reconnecting. Program state unconfirmed.') {
     const status = this.element.querySelector('.ycs-connection-status');
     status.hidden = connected;
     status.textContent = connected ? '' : text;
+    if (this.connected !== connected) {
+      this.connected = connected;
+      this.paintTally();
+    }
   }
   // Renderer reports from /api/ycs/stages/:stage/health. A failed slot keeps its
   // previous frame on air and retries, so show the error rather than guess.
@@ -178,6 +210,8 @@ window.YCSStagePanel = class StagePanel {
   setDataAvailable(available) {
     const link = this.element.querySelector('.ycs-manager-link');
     link.classList.toggle('ycs-error', !available);
+    if (available) link.removeAttribute('aria-description');
+    else link.setAttribute('aria-description', 'Linked data needs attention');
     link.title = available
       ? 'Open this stage in Data Manager'
       : 'Linked data needs attention · Open Data Manager';
