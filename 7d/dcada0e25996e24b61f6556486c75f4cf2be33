@@ -1,0 +1,29 @@
+ycs/tests/rehearsal.test.cjs
+  s_9418e5eab7ce0f::t_37005de3205b5c 13-14
+  s_9418e5eab7ce0f::t_4330307cd123ec 57-60,62-82
+  s_9418e5eab7ce0f::t_2dced91303fd58 61
+ycs/rehearsal/index.html
+  s_9418e5eab7ce0f::t_3c4671939e1315 13-14
+YCS.md
+  s_9418e5eab7ce0f::t_f72e930c2c4a6c 49,219,239-261,297
+ycs/rehearsal.cjs
+  s_9418e5eab7ce0f::t_5c172fb083b54a 10,81,103-121,126-127,133,156-159
+ycs/rehearsal/rehearsal.js
+  s_9418e5eab7ce0f::t_3c4671939e1315 155-158,160-179,184-189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7ddcada0e25996e24b61f6556486c75f4cf2be33",
+  "prompts": {},
+  "sessions": {
+    "s_9418e5eab7ce0f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f4ec352b-8f14-404c-b52f-f77f714d11fb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Brandon Ly <git@brndn.ly>"
+    }
+  }
+}
