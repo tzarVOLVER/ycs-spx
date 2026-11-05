@@ -1,0 +1,39 @@
+ycs/tests/companion.test.cjs
+  s_aae51de1b1b3c2::t_14ee6333ca48c4 50-52
+ycs/tests/toggle.test.cjs
+  s_aae51de1b1b3c2::t_14ee6333ca48c4 6-8,11,36,38,42,46-47
+ycs/settings.cjs
+  s_aae51de1b1b3c2::t_7a7a4a18dbc429 54-55,188-199
+ycs/tests/command-reliability.test.cjs
+  s_aae51de1b1b3c2::t_936e0f1bc961fb 140,165
+  s_aae51de1b1b3c2::t_7f442d6a16c6b8 142-144,152-164,166-173
+  s_aae51de1b1b3c2::t_1043b04dd2d98d 1-68,70-139,141,145-151,174-273
+  s_aae51de1b1b3c2::t_a60ab48bb0a889 69
+ycs/tests/playback.test.cjs
+  s_aae51de1b1b3c2::t_14ee6333ca48c4 89,99-100,102,105-106
+ycs/index.cjs
+  s_aae51de1b1b3c2::t_99abd66bf5e1ce 152-153,155
+  s_aae51de1b1b3c2::t_4c627ba3d0aff2 66,68,156-158
+ycs/playback.cjs
+  s_aae51de1b1b3c2::t_1579851fa9887a 217-220,224,228-229,232,234,362,442,473
+  s_aae51de1b1b3c2::t_220b59e2126203 9,14-19,31,38-42,45,51-83,88-102,105-110,168-171,185,188,204-216,221-223,226-227,230-231,233,235-249,340,344-345,349-361,363-368,402-403,407,419,432-437,439,443,447,467,475-478
+  s_aae51de1b1b3c2::t_fd96a4667d2310 111-113,267,327,413
+ycs/tests/prioritized-fixes.test.cjs
+  s_aae51de1b1b3c2::t_14ee6333ca48c4 126-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6cc535fe014b91bf24e6960a26793a6d1cfefa0d",
+  "prompts": {},
+  "sessions": {
+    "s_aae51de1b1b3c2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9639c007-7920-48b1-a1a9-3e7f6aa5e671",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Brandon Ly <git@brndn.ly>"
+    }
+  }
+}
