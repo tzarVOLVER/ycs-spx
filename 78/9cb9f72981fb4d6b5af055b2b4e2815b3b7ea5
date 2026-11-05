@@ -1,0 +1,61 @@
+ycs/playback.cjs
+  s_18fd38818aa8e7::t_39ad74896b6f80 172-175,191,206,208-222,250-251,365,493
+YCS.md
+  s_18fd38818aa8e7::t_7c7d9099c5fb97 229
+  s_18fd38818aa8e7::t_39ad74896b6f80 49,251-273,309
+ycs/sockets.cjs
+  s_18fd38818aa8e7::t_39ad74896b6f80 44-45,73
+ycs/public/controller.js
+  s_18fd38818aa8e7::t_39ad74896b6f80 8
+  s_18fd38818aa8e7::t_7c7d9099c5fb97 442
+server.js
+  s_18fd38818aa8e7::t_39ad74896b6f80 928-937
+ycs/start-runtime.ps1
+  s_18fd38818aa8e7::t_39ad74896b6f80 79
+ycs/rehearsal/rehearsal.js
+  s_18fd38818aa8e7::t_39ad74896b6f80 163-166,168-187,192-197
+ycs/tests/playback.test.cjs
+  s_18fd38818aa8e7::t_39ad74896b6f80 12-13
+ycs/tests/output.test.cjs
+  s_18fd38818aa8e7::t_39ad74896b6f80 418-451
+ycs/program-recovery.cjs
+  s_18fd38818aa8e7::t_39ad74896b6f80 1-166
+ycs/public/controller.css
+  s_18fd38818aa8e7::t_39ad74896b6f80 57
+  s_18fd38818aa8e7::t_576dc39460e82a 163
+ycs/stop-runtime.ps1
+  s_18fd38818aa8e7::t_7c7d9099c5fb97 9-17
+ycs/tests/rehearsal.test.cjs
+  s_18fd38818aa8e7::t_39ad74896b6f80 13-14,57-82
+ycs/public/stage-panel.js
+  s_18fd38818aa8e7::t_39ad74896b6f80 4,7,35,78-81,216-224
+  s_18fd38818aa8e7::t_3a5a436b4c4ceb 225
+ycs/rehearsal.cjs
+  s_18fd38818aa8e7::t_39ad74896b6f80 10,81,103-121,126-127,133,156-159
+ycs/tests/controller.test.cjs
+  s_18fd38818aa8e7::t_39ad74896b6f80 566-581
+ycs/tests/restart-recovery.test.cjs
+  s_18fd38818aa8e7::t_39ad74896b6f80 1-319
+ycs/index.cjs
+  s_18fd38818aa8e7::t_39ad74896b6f80 10,23,25,40-72,85,102,109,116-120,385-388,391-397,400-403,405-406
+ycs/rehearsal/index.html
+  s_18fd38818aa8e7::t_39ad74896b6f80 13-14
+ycs/tests/stage-panel.test.cjs
+  s_18fd38818aa8e7::t_39ad74896b6f80 158-178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "789cb9f72981fb4d6b5af055b2b4e2815b3b7ea5",
+  "prompts": {},
+  "sessions": {
+    "s_18fd38818aa8e7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6fe2a98b-f46e-40b1-aaa1-5a6dad62bdb9",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Brandon Ly <git@brndn.ly>"
+    }
+  }
+}
