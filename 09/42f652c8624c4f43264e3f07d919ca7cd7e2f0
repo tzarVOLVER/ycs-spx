@@ -1,0 +1,22 @@
+ycs/google-sheets-api.cjs
+  s_16707d2802f5c5::t_188eea552fe922 5,8,11-13,38-40,63-64,106-107,148-154,158-191,205-206,208-214
+ycs/tests/sheets-api-batch.test.cjs
+  s_16707d2802f5c5::t_8e25c3a7211b23 1-58,60-62
+  s_16707d2802f5c5::t_cf7f5adc2502c4 59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0942f652c8624c4f43264e3f07d919ca7cd7e2f0",
+  "prompts": {},
+  "sessions": {
+    "s_16707d2802f5c5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3065b94a-99f0-4103-96a7-f160c812b186",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Brandon Ly <git@brndn.ly>"
+    }
+  }
+}
