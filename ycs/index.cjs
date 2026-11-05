@@ -10,6 +10,8 @@ const outputAccess = require('./output-access.cjs');
 
 module.exports = function registerYCS(app, config, hooks = {}) {
   if (!config.ycs?.enabled) return;
+  // Views swap the stock Kill menu item for the managed restart in YCS settings.
+  app.locals.ycsEnabled = true;
   const settings = config.ycs;
   // Stock SPX replaces global.config when the login policy is saved. Read login
   // settings from it per request; YCS settings stay as started until restart.
