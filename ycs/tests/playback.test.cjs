@@ -9,7 +9,8 @@ const { RundownRepository, Playback } = require('../playback.cjs');
 const { testData } = require('./helpers/test-data.cjs');
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ycs-playback-'));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  // A program-state write can still be finishing when a test ends.
+  t.after(() => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 }));
   const stages = [1, 2, 3].map(number => ({ id: `stage-${number}`, project: `Stage${number}`, rundown: 'Show' }));
   for (const [index, stage] of stages.entries()) {
     const folder = path.join(root, stage.project, 'data');

@@ -54,6 +54,7 @@
 .ycs-command-status.ycs-error{padding:8px 10px;border:1px solid #b9792a;border-left-width:3px;border-radius:4px;background:#3a2a14;color:#ffe2a8!important}
 .ycs-copy-fallback{width:100%;box-sizing:border-box;margin-top:4px;padding:7px;background:#1e2d37;color:#e2eaf0;border:1px solid #8095a3;border-radius:3px;font:12px/1.4 monospace}
 .ycs-stage-panel [hidden]{display:none!important}
+.ycs-restored-dismiss{margin:0 0 0 4px;padding:0;background:none;border:0;color:inherit;font:inherit;text-decoration:underline;cursor:pointer}
 @media(max-width:420px){.ycs-stage-panel{padding:14px 12px}.ycs-output-options{gap:7px}.ycs-output-select{padding:8px 9px!important;column-gap:7px}.ycs-copy-output{flex-basis:40px}}
 /* Compact inline labels in the native rundown editor. */
 .ycs-companion-tools{border-top:1px solid #43525d;margin-top:10px;padding-top:8px;font:12px/1.4 Arial,sans-serif;color:#c1cfda}
@@ -159,4 +160,4 @@ html[data-ycs-connection="lost"] .itemrow[data-spx-onair="true"]{box-shadow:0 0 
 html[data-ycs-connection="lost"] .itemrow[data-spx-onair="true"] #Collapsed div:has(>[data-spx-name="icon"])::before,
 html[data-ycs-connection="lost"] .itemrow[data-spx-onair="true"] .ycs-editor-title::after{background:#6b7a86}
 html[data-ycs-connection="lost"] .itemrow .playTrue{color:#9aa8b3!important}
-.ycs-output-health{white-space:normal}
+.ycs-output-health,.ycs-restored-status{white-space:normal}

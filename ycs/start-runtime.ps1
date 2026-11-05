@@ -76,7 +76,7 @@ try {
     }
     if (-not $ready) { throw "Runtime did not become ready at $readinessUrl. Check $stderr" }
     Write-Output "YCS runtime ready (PID $($startedProcess.Id)). $baseUrl/ycs/data-manager"
-    Write-Output 'Saved connections refresh in the background. Program starts stopped.'
+    Write-Output 'Saved connections refresh in the background. Program starts stopped unless the last run crashed within ycs.restoreProgramWithinSeconds.'
 } catch {
     if ($startedProcess -and -not $startedProcess.HasExited) { Stop-Process -Id $startedProcess.Id }
     throw
